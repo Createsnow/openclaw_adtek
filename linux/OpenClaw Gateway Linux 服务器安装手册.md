@@ -118,6 +118,8 @@ Gateway 虚机上验证：`nc -vz <MySQL 主机> 3306`。
 | `XA_DOMESTIC_API_KEY` | 百炼 API Key |
 | `XA_DOMESTIC_BASE_URL` | 已预填 `https://dashscope.aliyuncs.com/compatible-mode/v1` |
 | `XA_DOMESTIC_MODEL_ID` | 百炼模型 ID。完整引用 `bailian/<模型 ID>` 由 compose 自动拼 |
+| `OA_MYSQL_HOST` | 第 3 节 MySQL 机器的内网 IP 或域名 |
+| `OA_MYSQL_PORT` / `OA_MYSQL_USER` / `OA_MYSQL_DATABASE` | 已预填 `3306` / `xa_oa` / `xa_oa`，和 DBA 建的不一样时再改 |
 | `OA_MYSQL_PASSWORD` | 第 3 节的密码 |
 | `OA_APP_SECRET` / `OA_API_USER_ID` | OA AppSecret；接口账号人员 id（纯数字，只用于只读预检，不是申请人） |
 | `WECOM_IDENTITY_CORPID` / `WECOM_IDENTITY_SECRET` | 企微**自建应用**凭据（身份转换用，不是机器人 BotSecret） |
@@ -142,7 +144,7 @@ docker run --rm --entrypoint ls xa-gateway-oa:2026.9.2 /opt/xa/oa-workflow-bridg
 
 ## 6. 写配置
 
-**`~/xa/oa-bridge-config.json`**：填 `mysql.host` / `user` / `database`、`appId`、`publicKeySpkiBase64`；不写密码。初装 `active: false`，`isnextflow: "0"`。字段见 [OA 接入手册](OA_tool/OA%20Workflow%20Bridge%20接入手册.md) 第 4 节。
+**`~/xa/oa-bridge-config.json`**：只填 OA 业务配置 `appId`、`publicKeySpkiBase64`（数据库连接已在 `.env`）。初装 `active: false`，`isnextflow: "0"`。字段见 [OA 接入手册](OA_tool/OA%20Workflow%20Bridge%20接入手册.md) 第 4 节。
 
 **`~/xa/config/openclaw.json`**：用仓库样例，先去掉 `channels` 和 `bindings`（企微插件还没装，写了会 `unknown channel id: wecom`，容器反复重启）：
 

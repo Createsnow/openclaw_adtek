@@ -158,10 +158,11 @@ AGENTS.md 规则零条命中、但确实是 IT 方面的事时，模型不传 `t
 | `attachmentFieldName` | 文档附件字段 `scfj` |
 | `pendingTtlHours` / `inboxTtlMinutes` | 待确认 24 小时；未进单附件 30 分钟 |
 | `maxAttachmentBytes` / `maxTotalAttachmentBytes` | 单件 10MB / 合计 25MB |
-| `mysql.host/port/user/database` | 非机密连接参数；密码走 `OA_MYSQL_PASSWORD` |
 | `identity.adapter` | `on` 自动查 OA 人员 id；`off` 时 `prepare` 回 `OA_IDENTITY_MAPPING_REQUIRED` |
 
-插件读的环境变量：`OA_MYSQL_PASSWORD`、`OA_API_USER_ID`、`OA_APP_SECRET`、`WECOM_IDENTITY_CORPID`、`WECOM_IDENTITY_SECRET`、`OPENCLAW_STATE_DIR`。`openclaw.json` 侧：`plugins.allow` 与 `entries` 只用 id `oa-workflow-bridge`（旧 id `oa-workflow-bridge-redis`、`wecom-oa-identity-adapter` 删干净），`load.paths` 为 `/opt/xa/oa-workflow-bridge`，两处 `alsoAllow` 含 `oa_workflow`。
+数据库连接全部来自环境变量（部署时写在 `.env`）：`OA_MYSQL_HOST`、`OA_MYSQL_PORT`（默认 3306）、`OA_MYSQL_USER`、`OA_MYSQL_DATABASE`、`OA_MYSQL_PASSWORD`。旧部署 `bridge-config.json` 里的 `mysql` 段仍可用，但同名环境变量优先，建议迁到 `.env` 后删掉该段。
+
+插件读的其他环境变量：`OA_API_USER_ID`、`OA_APP_SECRET`、`WECOM_IDENTITY_CORPID`、`WECOM_IDENTITY_SECRET`、`OPENCLAW_STATE_DIR`。`openclaw.json` 侧：`plugins.allow` 与 `entries` 只用 id `oa-workflow-bridge`（旧 id `oa-workflow-bridge-redis`、`wecom-oa-identity-adapter` 删干净），`load.paths` 为 `/opt/xa/oa-workflow-bridge`，两处 `alsoAllow` 含 `oa_workflow`。
 
 改插件代码、`systems.json`、`package.json` 都要重建镜像；升级 OpenClaw 改 Dockerfile 的底座版本。加载成功的日志是 `[oa-workflow-bridge] loaded (MySQL state)`。
 
@@ -314,10 +315,10 @@ docker exec xa-gateway node /opt/xa/oa-workflow-bridge/scripts/reconcile.mjs --o
 | --- | --- |
 | `Cannot find module 'jpeg-js'` / `Cannot find package 'mysql2'` | 用的不是安装手册第 5 节构建的镜像（compose `image:` 应为 `xa-gateway-oa:…`），或 `load.paths` 仍指向 `~/xa/extensions` 下的旧目录 |
 | `MySQL init failed: ENOENT … bridge-config.json` | compose 没挂 `./oa-bridge-config.json` |
-| `MySQL init failed: OA_MYSQL_PASSWORD is not configured` | compose 不是仓库版本（仓库版会在 `.env` 缺项时直接拒绝启动）；换成仓库 compose 后 `up -d` |
+| `MySQL init failed: OA_MYSQL_PASSWORD is not configured` / `OA_MYSQL_HOST is required` | compose 不是仓库版本（仓库版会在 `.env` 缺项时直接拒绝启动）；换成仓库 compose 后 `up -d` |
 | `ECONNREFUSED` / `ETIMEDOUT` / `EHOSTUNREACH` | 主机或端口错；MySQL 未监听外网地址（`bind-address`）；防火墙未放通 Gateway → 3306 |
 | `ER_ACCESS_DENIED_ERROR` | 密码错；账号 host 部分不含 Gateway 来源 IP；本机装的 MySQL 还留着匿名账号（见安装手册第 3 节） |
-| `ER_BAD_DB_ERROR` | 库没建，或 `mysql.database` 写错 |
+| `ER_BAD_DB_ERROR` | 库没建，或 `.env` 的 `OA_MYSQL_DATABASE` 写错 |
 | `ER_TABLEACCESS_DENIED_ERROR` / 建表失败 | 账号缺 `CREATE` / `INDEX` 权限 |
 | 回执 `DB_UNAVAILABLE` | 上面几项之一；插件会在下次调用自动重连，不必为第一次失败重启 Gateway（初始化失败除外） |
 | 插件不出现在 list / 工具冲突 | `allow` / `paths` / `entries` 全部改成 `oa-workflow-bridge`，旧 id 删干净 |

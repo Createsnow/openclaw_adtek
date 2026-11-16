@@ -25,6 +25,10 @@ services:
       XA_DOMESTIC_MODEL_ID: ${XA_DOMESTIC_MODEL_ID:?.env 缺 XA_DOMESTIC_MODEL_ID}
       # Provider 键固定 bailian，完整引用由模型 ID 拼出来，不用另填
       XA_DOMESTIC_MODEL_REF: bailian/${XA_DOMESTIC_MODEL_ID}
+      OA_MYSQL_HOST: ${OA_MYSQL_HOST:?.env 缺 OA_MYSQL_HOST}
+      OA_MYSQL_PORT: ${OA_MYSQL_PORT:-3306}
+      OA_MYSQL_USER: ${OA_MYSQL_USER:-xa_oa}
+      OA_MYSQL_DATABASE: ${OA_MYSQL_DATABASE:-xa_oa}
       OA_MYSQL_PASSWORD: ${OA_MYSQL_PASSWORD:?.env 缺 OA_MYSQL_PASSWORD}
       OA_API_USER_ID: ${OA_API_USER_ID:?.env 缺 OA_API_USER_ID}
       OA_APP_SECRET: ${OA_APP_SECRET:?.env 缺 OA_APP_SECRET}
@@ -34,7 +38,7 @@ services:
       - ./config:/home/node/.openclaw
       - ./workspace:/home/node/.openclaw/workspace
       - ./extensions:/home/node/.openclaw/extensions
-      # OA 桥接现网配置（appId、公钥、MySQL 主机等，不含密码）
+      # OA 桥接业务配置（appId、公钥、建单开关等；数据库连接与凭据在 .env）
       - ./oa-bridge-config.json:/opt/xa/oa-workflow-bridge/bridge-config.json:ro
     # 只走本机 / SSH 隧道
     ports:

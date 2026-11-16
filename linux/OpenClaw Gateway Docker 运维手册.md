@@ -135,6 +135,7 @@ cd ~/xa && docker compose up -d
 | `XA_IT_WECOM_BOT_*` | 企微后台重置机器人 | 收发正常 |
 | `XA_DOMESTIC_API_KEY` | 百炼控制台新建 Key | 对话无 401 |
 | `OA_MYSQL_PASSWORD` | DBA 先改 MySQL 密码 | 日志无 `MySQL init failed` |
+| `OA_MYSQL_HOST` 等 | MySQL 换机器 / 换库 | 同上；`SHOW TABLES` 有三张表 |
 | `OA_APP_SECRET` / `OA_API_USER_ID` | OA 管理端 | OA 只读预检通过 |
 | `WECOM_IDENTITY_*` | 企微自建应用 | 新员工 `prepare` 能查到身份 |
 
@@ -267,7 +268,7 @@ UPDATE xa_oa.oa_ticket
 
    ```bash
    cd ~/xa && XA_UID=$(id -u) XA_GID=$(id -g) sudo -E python3 - <<'EOF'
-   import os, pathlib
+   import json, os, pathlib
    names = {
        "gateway_token": "OPENCLAW_GATEWAY_TOKEN",
        "wecom_bot_id": "XA_IT_WECOM_BOT_ID", "wecom_bot_secret": "XA_IT_WECOM_BOT_SECRET",
@@ -281,15 +282,23 @@ UPDATE xa_oa.oa_ticket
        if "'" in value:
            raise SystemExit(f"{file}.txt 含单引号，请手工写进 .env")
        lines.append(f"{var}='{value}'")
+   # 数据库连接参数从旧 oa-bridge-config.json 搬过来，并把该段删掉
+   bridge = pathlib.Path("oa-bridge-config.json")
+   cfg = json.loads(bridge.read_text())
+   mysql = cfg.pop("mysql", {})
+   for key, var in [("host", "OA_MYSQL_HOST"), ("port", "OA_MYSQL_PORT"), ("user", "OA_MYSQL_USER"), ("database", "OA_MYSQL_DATABASE")]:
+       if mysql.get(key) not in (None, ""):
+           lines.append(f"{var}='{mysql[key]}'")
+   bridge.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n")
    env = pathlib.Path(".env")
    env.write_text("\n".join(lines) + "\n")
    os.chown(env, int(os.environ["XA_UID"]), int(os.environ["XA_GID"]))
    os.chmod(env, 0o600)
-   print("写好 .env：", len(lines) - 2, "项凭据")
+   print("写好 .env：", len(lines) - 2, "项配置")
    EOF
    ```
 
-   `model_ref.txt` 不再需要（compose 自动拼 `bailian/<模型 ID>`）。
+   `model_ref.txt` 不再需要（compose 自动拼 `bailian/<模型 ID>`）。数据库主机、端口、账号、库名从 `oa-bridge-config.json` 搬进 `.env`，并从该文件删掉。
 3. 换 compose，停旧容器，文件属主改成自己（只此一次）：
 
    ```bash

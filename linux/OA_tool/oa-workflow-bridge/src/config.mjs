@@ -52,18 +52,26 @@ function validateBaseUrl(value) {
   return "https://adtekoa.com";
 }
 
-/** MySQL 连接参数（非机密）。密码只从环境变量 OA_MYSQL_PASSWORD 读。 */
-function loadMysqlConfig(raw) {
+function envText(env, name) {
+  return String(env?.[name] ?? "").trim();
+}
+
+/**
+ * MySQL 连接参数。优先读环境变量 OA_MYSQL_HOST / OA_MYSQL_PORT / OA_MYSQL_USER / OA_MYSQL_DATABASE
+ * （部署时都写在 .env），逐项回退到旧部署 bridge-config.json 的 mysql 段。密码只从 OA_MYSQL_PASSWORD 读。
+ */
+export function loadMysqlConfig(raw, env = process.env) {
   const mysql = raw?.mysql && typeof raw.mysql === "object" ? raw.mysql : {};
+  const pick = (name, fallback) => envText(env, name) || String(fallback ?? "").trim();
   const config = {
-    host: String(mysql.host || "").trim(),
-    port: requirePositiveInteger(mysql.port ?? 3306, "mysql.port"),
-    user: String(mysql.user || "").trim(),
-    database: String(mysql.database || "").trim(),
+    host: pick("OA_MYSQL_HOST", mysql.host),
+    port: requirePositiveInteger(pick("OA_MYSQL_PORT", mysql.port) || 3306, "OA_MYSQL_PORT"),
+    user: pick("OA_MYSQL_USER", mysql.user),
+    database: pick("OA_MYSQL_DATABASE", mysql.database),
   };
-  if (!/^[A-Za-z0-9.-]{1,253}$/.test(config.host)) throw new Error("mysql.host is required");
-  if (!/^[A-Za-z0-9_.-]{1,32}$/.test(config.user)) throw new Error("mysql.user is required");
-  if (!/^[A-Za-z0-9_]{1,64}$/.test(config.database)) throw new Error("mysql.database is required");
+  if (!/^[A-Za-z0-9.-]{1,253}$/.test(config.host)) throw new Error("OA_MYSQL_HOST is required");
+  if (!/^[A-Za-z0-9_.-]{1,32}$/.test(config.user)) throw new Error("OA_MYSQL_USER is required");
+  if (!/^[A-Za-z0-9_]{1,64}$/.test(config.database)) throw new Error("OA_MYSQL_DATABASE is required");
   return config;
 }
 
@@ -75,7 +83,7 @@ function loadIdentityConfig(raw) {
   return { adapter };
 }
 
-export async function loadBridgeConfig() {
+export async function loadBridgeConfig({ env = process.env } = {}) {
   const raw = await readJsonFile(CONFIG_URL);
   const config = {
     active: raw.active === true,
@@ -90,7 +98,7 @@ export async function loadBridgeConfig() {
     inboxTtlMinutes: requirePositiveInteger(raw.inboxTtlMinutes ?? DEFAULT_INBOX_TTL_MINUTES, "inboxTtlMinutes"),
     maxAttachmentBytes: requirePositiveInteger(raw.maxAttachmentBytes, "maxAttachmentBytes"),
     maxTotalAttachmentBytes: requirePositiveInteger(raw.maxTotalAttachmentBytes, "maxTotalAttachmentBytes"),
-    mysql: loadMysqlConfig(raw),
+    mysql: loadMysqlConfig(raw, env),
     identity: loadIdentityConfig(raw),
   };
   if (!/^[A-Za-z0-9._-]{2,64}$/.test(config.appId)) {
