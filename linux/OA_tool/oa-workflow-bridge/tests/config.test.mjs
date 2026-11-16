@@ -13,13 +13,57 @@ test('isnextflow 只接受字符串 "0" 或 "1"', () => {
 });
 
 const MYSQL_ENV = { OA_MYSQL_HOST: "10.0.0.5", OA_MYSQL_USER: "xa_oa", OA_MYSQL_DATABASE: "xa_oa" };
+const PUBLIC_KEY = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA" + "A".repeat(300) + "IDAQAB";
+const BASE_ENV = { ...MYSQL_ENV, OA_APP_ID: "2026-09-01-test", OA_PUBLIC_KEY: PUBLIC_KEY };
 
-test("仓库 bridge-config.json：isnextflow 为 0，MySQL 连接参数来自环境变量", async () => {
-  const config = await loadBridgeConfig({ env: MYSQL_ENV });
+test("只填必需的环境变量时，其余用默认值：不建单、不自动流转、流程 602", async () => {
+  const config = await loadBridgeConfig({ env: BASE_ENV, legacy: {} });
+  assert.equal(config.active, false);
   assert.equal(config.isnextflow, "0");
-  assert.deepEqual(config.mysql, { host: "10.0.0.5", port: 3306, user: "xa_oa", database: "xa_oa" });
+  assert.equal(config.baseUrl, "https://adtekoa.com");
+  assert.equal(config.workflowId, 602);
+  assert.equal(config.attachmentFieldName, "scfj");
+  assert.equal(config.pendingTtlHours, 24);
   assert.equal(config.inboxTtlMinutes, 30);
+  assert.equal(config.maxAttachmentBytes, 10485760);
+  assert.equal(config.maxTotalAttachmentBytes, 26214400);
   assert.equal(config.identity.adapter, "on");
+  assert.deepEqual(config.mysql, { host: "10.0.0.5", port: 3306, user: "xa_oa", database: "xa_oa" });
+});
+
+test("环境变量可以打开建单、自动流转，也能覆盖固定项", async () => {
+  const config = await loadBridgeConfig({
+    env: { ...BASE_ENV, OA_ACTIVE: "true", OA_ISNEXTFLOW: "1", OA_INBOX_TTL_MINUTES: "45", OA_IDENTITY_ADAPTER: "OFF" },
+    legacy: {},
+  });
+  assert.equal(config.active, true);
+  assert.equal(config.isnextflow, "1");
+  assert.equal(config.inboxTtlMinutes, 45);
+  assert.equal(config.identity.adapter, "off");
+});
+
+test("旧部署的 bridge-config.json 逐项兜底，同名环境变量优先", async () => {
+  const legacy = {
+    active: true, appId: "legacy-app", publicKeySpkiBase64: PUBLIC_KEY, isnextflow: "1",
+    mysql: { host: "old-host", user: "old_user", database: "old_db" },
+  };
+  const fromFile = await loadBridgeConfig({ env: {}, legacy });
+  assert.equal(fromFile.active, true);
+  assert.equal(fromFile.appId, "legacy-app");
+  assert.equal(fromFile.isnextflow, "1");
+  assert.equal(fromFile.mysql.host, "old-host");
+  const overridden = await loadBridgeConfig({ env: { OA_ACTIVE: "false", OA_APP_ID: "new-app" }, legacy });
+  assert.equal(overridden.active, false);
+  assert.equal(overridden.appId, "new-app");
+});
+
+test("必填项缺失或取值非法时拒绝加载", async () => {
+  await assert.rejects(loadBridgeConfig({ env: { ...BASE_ENV, OA_APP_ID: "" }, legacy: {} }), /OA_APP_ID is missing/);
+  await assert.rejects(loadBridgeConfig({ env: { ...BASE_ENV, OA_PUBLIC_KEY: "" }, legacy: {} }), /OA_PUBLIC_KEY is missing/);
+  await assert.rejects(loadBridgeConfig({ env: { ...BASE_ENV, OA_ACTIVE: "maybe" }, legacy: {} }), /OA_ACTIVE must be true or false/);
+  await assert.rejects(loadBridgeConfig({ env: { ...BASE_ENV, OA_ISNEXTFLOW: "2" }, legacy: {} }), /isnextflow must be "0" or "1"/);
+  await assert.rejects(loadBridgeConfig({ env: { ...BASE_ENV, OA_BASE_URL: "https://evil.example" }, legacy: {} }), /adtekoa\.com/);
+  await assert.rejects(loadBridgeConfig({ env: { ...BASE_ENV, OA_IDENTITY_ADAPTER: "auto" }, legacy: {} }), /OA_IDENTITY_ADAPTER/);
 });
 
 test("MySQL 连接参数：环境变量优先，逐项回退到旧 bridge-config.json 的 mysql 段", () => {

@@ -44,11 +44,10 @@ SmartX 集群（平台运维：虚机规格、存储、网络、快照）
  └── Linux 虚机（本系统）
       └── ~/xa/
           ├── docker-compose.yml       image xa-gateway-oa，端口只绑 127.0.0.1:18789，以 XA_UID 运行
-          ├── .env                     全部凭据与 XA_UID / XA_GID（不进 git）
+          ├── .env                     部署要改的全部配置：凭据、OA 开关、MySQL、XA_UID（不进 git）
           ├── config/openclaw.json     → /home/node/.openclaw
           ├── workspace/               Agent 规则（AGENTS.md 等）
-          ├── extensions/              企微插件（OA 插件在镜像 /opt/xa/oa-workflow-bridge）
-          └── oa-bridge-config.json    只读挂进插件目录（不含密码）
+          └── extensions/              企微插件（OA 插件在镜像 /opt/xa/oa-workflow-bridge）
 ```
 
 - 工作区放虚机本机盘，不要 NFS / CIFS / 共享盘。
@@ -123,7 +122,7 @@ sequenceDiagram
 - 「好的」「可以」不算确认。问地点用字母 A–F，数字只留给确认 / 取消。
 - 多条规则命中时不猜；零条命中但确是 IT 的事，插件兜底建单。电脑 / 打印机 / 网络、邮箱、文件管理、MES 的地点必须问清，不默认园区。
 - 待确认 24 小时过期；未进单的附件 30 分钟过期，`/new` 和群聊会话结束立即清。
-- 现网 `isnextflow=0`：工单建出来但停在申请人节点，不自动流转。项目正式启用后改 `"1"`。
+- 现网 `OA_ISNEXTFLOW=0`：工单建出来但停在申请人节点，不自动流转。项目正式启用后改 `1`。
 
 ## 5. 门控
 
@@ -182,7 +181,7 @@ sequenceDiagram
 | 身份 miss 依赖外部 | 企微通讯录 + 人事接口；回执码在会话 jsonl，不在 `docker logs` |
 | 全局一张待确认偏硬 | 员工换对话后体验像卡住 |
 | `unknown` 靠人工对账 | 见运维手册第 10 节 |
-| 现网不自动流转 | `isnextflow` 为 `"0"`；正式启用改 `"1"` 并重启 |
+| 现网不自动流转 | `.env` 的 `OA_ISNEXTFLOW=0`；正式启用改 `1` 后 `docker compose up -d` |
 | 配置分层坑 | `bootstrapMaxChars`、`skills` 只写 defaults 不生效 |
 | compose 无内存闸 | 规格由 SmartX 虚机决定，容器限额不能代替扩虚机 |
 
@@ -202,7 +201,7 @@ sequenceDiagram
 1. 先做：Nacos → 宿主机 sync 脚本重写 `~/xa/.env` → `docker compose up -d`。compose 和 json 都不改；Nacos 宕机不影响已运行的容器。
 2. 再考虑：容器启动时直拉 Nacos（强依赖配置中心可用性），或 OpenClaw `secrets.providers.exec` 解析器（只适合凭据类字段）。
 3. 每套 `~/xa-*` 用独立 namespace / group，不共用 dataId。Nacos 访问凭据本身要单独注入。
-4. 不进配置中心：工具白名单、bindings、`load.paths`、规则包、OA `active` 开关。
+4. 不进配置中心：工具白名单、bindings、`load.paths`、规则包。OA 建单开关 `OA_ACTIVE` 也建议留在本机 `.env` 手工控制。
 
 **接新的外部系统**：另做一个插件和工具名，不要塞进 `oa_workflow`。沿用 OA 桥接的形态：
 

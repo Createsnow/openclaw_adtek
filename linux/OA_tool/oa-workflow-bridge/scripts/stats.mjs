@@ -2,7 +2,7 @@
 /**
  * 只读使用统计：直接查 oa_ticket，不解析会话库。
  *   node scripts/stats.mjs [--days 30]
- * 需要 OA_MYSQL_PASSWORD；连接参数取自 bridge-config.json。输出 JSON（不含任何员工身份）。
+ * 数据库连接取自环境变量 OA_MYSQL_*（容器里已注入）。输出 JSON（不含任何员工身份）。
  */
 import { loadBridgeConfig } from "../src/config.mjs";
 import { createMysqlDb } from "../src/db.mjs";

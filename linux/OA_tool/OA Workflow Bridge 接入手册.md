@@ -9,7 +9,7 @@ OA 桥接插件 `oa-workflow-bridge`（工具 `oa_workflow`）的唯一正文：
 | 身份转换 | 插件内 `src/identity/`，不注册工具 |
 | 锁 | 进程内按人加锁（`withSenderLock`），不同员工互不等待；库层唯一约束兜底「同一人一张待确认」 |
 | 附件 | 本机 staging，字节不进库、不进模型 |
-| 建单开关 | `bridge-config.json` 的 `active`；流转开关 `isnextflow`（现网 `"0"`） |
+| 配置 | 全部来自环境变量（`.env`）；建单开关 `OA_ACTIVE`，流转开关 `OA_ISNEXTFLOW`（现网 `0`） |
 | 依赖 | `mysql2`、`jpeg-js`、`pngjs` |
 
 只能单 Gateway：锁是进程内的，附件在本机盘，两个 Gateway 连同一个库会双写 OA。
@@ -40,7 +40,7 @@ OA 桥接插件 `oa-workflow-bridge`（工具 `oa_workflow`）的唯一正文：
 | `src/inbox.mjs` | 附件一出现就落进 inbox（拷进 staging + 入库）、搬进工单 |
 | `src/store.mjs` | 三张表的读写、进程锁、staging 路径、到期回收 |
 | `src/db.mjs` | MySQL 连接池、建表语句、只读表检查 |
-| `src/config.mjs` | `bridge-config.json`、`systems.json` 加载与校验 |
+| `src/config.mjs` | 环境变量配置、`systems.json` 加载与校验 |
 | `src/mapping.mjs` | draft 校验（未命中兜底、问题预览、A–F 地点）、内部幂等号、OA 请求体 |
 | `src/oa-client.mjs` / `src/hrm-profile.mjs` | Ecology token、建单、提交前资料现查 |
 | `src/identity/` | 企微与人事点查、`oa_identity` 缓存 |
@@ -148,21 +148,34 @@ AGENTS.md 规则零条命中、但确实是 IT 方面的事时，模型不传 `t
 
 ## 4. 配置
 
-`~/xa/oa-bridge-config.json`，compose 只读挂到 `/opt/xa/oa-workflow-bridge/bridge-config.json`，改了 `docker compose restart`，不必重建镜像。样例 `bridge-config.example.json`。
+全部来自环境变量，部署时写在 `~/xa/.env`，改完 `docker compose up -d`（自动重建容器），不必重建镜像。没有配置文件。
 
-| 字段 | 说明 |
+每套环境要填的：
+
+| 变量 | 说明 |
 | --- | --- |
-| `active` | `false` 时确认回 `OA_BRIDGE_INACTIVE`，不调 OA，待确认单不动 |
-| `baseUrl` / `appId` / `publicKeySpkiBase64` / `workflowId` | OA 地址、应用、RSA 公钥、流程 602 |
-| `isnextflow` | 只认字符串 `"0"` / `"1"`。`"0"` 停在申请人节点；正式启用改 `"1"` |
-| `attachmentFieldName` | 文档附件字段 `scfj` |
-| `pendingTtlHours` / `inboxTtlMinutes` | 待确认 24 小时；未进单附件 30 分钟 |
-| `maxAttachmentBytes` / `maxTotalAttachmentBytes` | 单件 10MB / 合计 25MB |
-| `identity.adapter` | `on` 自动查 OA 人员 id；`off` 时 `prepare` 回 `OA_IDENTITY_MAPPING_REQUIRED` |
+| `OA_APP_ID` | OA 应用 appid（必填） |
+| `OA_PUBLIC_KEY` | OA 给的 RSA 公钥，一整行 base64（必填） |
+| `OA_ACTIVE` | 默认 `false`：确认时回 `OA_BRIDGE_INACTIVE`，不调 OA，待确认单不动。`true` 才真正建单 |
+| `OA_ISNEXTFLOW` | 默认 `0`：建单后停在申请人节点；`1` 自动流转。只认 `0` / `1` |
+| `OA_MYSQL_HOST` / `OA_MYSQL_PORT` / `OA_MYSQL_USER` / `OA_MYSQL_DATABASE` / `OA_MYSQL_PASSWORD` | 独立 MySQL（端口默认 3306） |
+| `OA_APP_SECRET` / `OA_API_USER_ID` | OA AppSecret；接口账号人员 id（只用于换 token 与只读预检） |
+| `WECOM_IDENTITY_CORPID` / `WECOM_IDENTITY_SECRET` | 企微自建应用，身份转换用 |
 
-数据库连接全部来自环境变量（部署时写在 `.env`）：`OA_MYSQL_HOST`、`OA_MYSQL_PORT`（默认 3306）、`OA_MYSQL_USER`、`OA_MYSQL_DATABASE`、`OA_MYSQL_PASSWORD`。旧部署 `bridge-config.json` 里的 `mysql` 段仍可用，但同名环境变量优先，建议迁到 `.env` 后删掉该段。
+全公司固定、一般不改（留空用默认值）：
 
-插件读的其他环境变量：`OA_API_USER_ID`、`OA_APP_SECRET`、`WECOM_IDENTITY_CORPID`、`WECOM_IDENTITY_SECRET`、`OPENCLAW_STATE_DIR`。`openclaw.json` 侧：`plugins.allow` 与 `entries` 只用 id `oa-workflow-bridge`（旧 id `oa-workflow-bridge-redis`、`wecom-oa-identity-adapter` 删干净），`load.paths` 为 `/opt/xa/oa-workflow-bridge`，两处 `alsoAllow` 含 `oa_workflow`。
+| 变量 | 默认 |
+| --- | --- |
+| `OA_BASE_URL` | `https://adtekoa.com`（只允许这个地址） |
+| `OA_WORKFLOW_ID` | `602` |
+| `OA_ATTACHMENT_FIELD` | `scfj` |
+| `OA_PENDING_TTL_HOURS` / `OA_INBOX_TTL_MINUTES` | `24` 小时 / `30` 分钟 |
+| `OA_MAX_ATTACHMENT_BYTES` / `OA_MAX_TOTAL_ATTACHMENT_BYTES` | 10MB / 25MB |
+| `OA_IDENTITY_ADAPTER` | `on`；`off` 时 `prepare` 回 `OA_IDENTITY_MAPPING_REQUIRED` |
+
+旧部署挂进来的 `bridge-config.json` 仍会逐项兜底读取，同名环境变量优先；迁移见运维手册第 12 节。
+
+另外 `OPENCLAW_STATE_DIR` 决定 staging 目录（compose 已设）。`openclaw.json` 侧：`plugins.allow` 与 `entries` 只用 id `oa-workflow-bridge`（旧 id `oa-workflow-bridge-redis`、`wecom-oa-identity-adapter` 删干净），`load.paths` 为 `/opt/xa/oa-workflow-bridge`，两处 `alsoAllow` 含 `oa_workflow`。
 
 改插件代码、`systems.json`、`package.json` 都要重建镜像；升级 OpenClaw 改 Dockerfile 的底座版本。加载成功的日志是 `[oa-workflow-bridge] loaded (MySQL state)`。
 
@@ -314,7 +327,7 @@ docker exec xa-gateway node /opt/xa/oa-workflow-bridge/scripts/reconcile.mjs --o
 | 现象 | 处理 |
 | --- | --- |
 | `Cannot find module 'jpeg-js'` / `Cannot find package 'mysql2'` | 用的不是安装手册第 5 节构建的镜像（compose `image:` 应为 `xa-gateway-oa:…`），或 `load.paths` 仍指向 `~/xa/extensions` 下的旧目录 |
-| `MySQL init failed: ENOENT … bridge-config.json` | compose 没挂 `./oa-bridge-config.json` |
+| `MySQL init failed: OA_APP_ID is missing or invalid` / `OA_PUBLIC_KEY …` | `.env` 没填或 compose 不是仓库版本；补完 `up -d` |
 | `MySQL init failed: OA_MYSQL_PASSWORD is not configured` / `OA_MYSQL_HOST is required` | compose 不是仓库版本（仓库版会在 `.env` 缺项时直接拒绝启动）；换成仓库 compose 后 `up -d` |
 | `ECONNREFUSED` / `ETIMEDOUT` / `EHOSTUNREACH` | 主机或端口错；MySQL 未监听外网地址（`bind-address`）；防火墙未放通 Gateway → 3306 |
 | `ER_ACCESS_DENIED_ERROR` | 密码错；账号 host 部分不含 Gateway 来源 IP；本机装的 MySQL 还留着匿名账号（见安装手册第 3 节） |
@@ -328,15 +341,15 @@ docker exec xa-gateway node /opt/xa/oa-workflow-bridge/scripts/reconcile.mjs --o
 | `RECONCILIATION_REQUIRED` | 禁止自动重试；按运维手册第 10 节人工对账 |
 | `PARAM_ERROR` / `HTTP_4xx` | OA 明确拒绝，单已结束；核对字段 / 附件格式，让员工重报 |
 | 单据出现在接口账号名下 | Header `userid` 必须是申请人；确认部署的是本仓库插件 |
-| `OA_BRIDGE_INACTIVE` | 现网 `bridge-config.json` 为 `active=false` |
+| `OA_BRIDGE_INACTIVE` | `.env` 里 `OA_ACTIVE=false` |
 
 ## 9. 禁止事项
 
 - 不要多 Gateway 连同一个库；不要同时加载旧 id。
-- 不要把 MySQL 密码、OA AppSecret、接口账号写进 `openclaw.json`、`bridge-config.json` 或 compose `environment:`。
+- 不要把 MySQL 密码、OA AppSecret、接口账号写进 `openclaw.json` 或 compose 文件本身，只写 `.env`。
 - 不要删 `oa_ticket` 历史行或改 `external_ticket_id`。
 - 不要把附件 base64 写进库。
 - 不要对 `unknown` / `failed` 自动再 `submit_confirmed`。
 - 不要用接口账号人员 id 当建单 Header `userid`；不要按姓名模糊匹配申请人。
 - 不要在宿主装 npm，不要把 `npm install` 写进 compose。
-- 不要在 `active=false` 时让规则声称 OA 已通。
+- 不要在 `OA_ACTIVE=false` 时让规则声称 OA 已通。

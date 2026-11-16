@@ -1,7 +1,8 @@
 import { readFile, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-const CONFIG_URL = new URL("../bridge-config.json", import.meta.url);
+/** 旧部署挂进来的配置文件。新部署全部用环境变量，这个文件不存在。 */
+const LEGACY_CONFIG_URL = new URL("../bridge-config.json", import.meta.url);
 const SYSTEMS_URL = new URL("../systems.json", import.meta.url);
 
 export const TICKET_TYPE_NAMES = Object.freeze(["运维支持", "权限申请", "IT需求"]);
@@ -56,6 +57,31 @@ function envText(env, name) {
   return String(env?.[name] ?? "").trim();
 }
 
+async function readLegacyConfig() {
+  try {
+    return await readJsonFile(LEGACY_CONFIG_URL);
+  } catch (error) {
+    if (error?.code === "ENOENT") return {};
+    throw error;
+  }
+}
+
+/** 环境变量优先；没有就用旧配置文件里的值；都没有用默认值。 */
+function pickSetting(env, name, legacyValue, fallback) {
+  const fromEnv = envText(env, name);
+  if (fromEnv) return fromEnv;
+  if (legacyValue !== undefined && legacyValue !== null && String(legacyValue).trim() !== "") return legacyValue;
+  return fallback;
+}
+
+function parseBoolean(value, label) {
+  if (typeof value === "boolean") return value;
+  const text = String(value ?? "").trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(text)) return true;
+  if (["false", "0", "no", "off", ""].includes(text)) return false;
+  throw new Error(`${label} must be true or false`);
+}
+
 /**
  * MySQL 连接参数。优先读环境变量 OA_MYSQL_HOST / OA_MYSQL_PORT / OA_MYSQL_USER / OA_MYSQL_DATABASE
  * （部署时都写在 .env），逐项回退到旧部署 bridge-config.json 的 mysql 段。密码只从 OA_MYSQL_PASSWORD 读。
@@ -75,40 +101,51 @@ export function loadMysqlConfig(raw, env = process.env) {
   return config;
 }
 
-function loadIdentityConfig(raw) {
-  const adapter = String(raw?.identity?.adapter || "on").trim().toLowerCase();
-  if (adapter !== "on" && adapter !== "off") {
-    throw new Error("identity.adapter must be on or off");
-  }
-  return { adapter };
-}
-
-export async function loadBridgeConfig({ env = process.env } = {}) {
-  const raw = await readJsonFile(CONFIG_URL);
+/**
+ * 插件配置，全部来自环境变量（部署时写在 .env）：
+ * - 每套环境都要填：OA_APP_ID、OA_PUBLIC_KEY；按需改：OA_ACTIVE（默认 false）、OA_ISNEXTFLOW（默认 "0"）
+ * - 全公司固定、一般不改：OA_BASE_URL、OA_WORKFLOW_ID、OA_ATTACHMENT_FIELD、OA_PENDING_TTL_HOURS、
+ *   OA_INBOX_TTL_MINUTES、OA_MAX_ATTACHMENT_BYTES、OA_MAX_TOTAL_ATTACHMENT_BYTES、OA_IDENTITY_ADAPTER
+ * 旧部署挂载的 bridge-config.json 仍可逐项兜底，同名环境变量优先。
+ */
+export async function loadBridgeConfig({ env = process.env, legacy } = {}) {
+  const raw = legacy ?? await readLegacyConfig();
+  const setting = (name, legacyValue, fallback) => pickSetting(env, name, legacyValue, fallback);
+  const adapter = String(setting("OA_IDENTITY_ADAPTER", raw?.identity?.adapter, "on")).trim().toLowerCase();
+  if (adapter !== "on" && adapter !== "off") throw new Error("OA_IDENTITY_ADAPTER must be on or off");
   const config = {
-    active: raw.active === true,
-    baseUrl: validateBaseUrl(raw.baseUrl),
-    appId: String(raw.appId || "").trim(),
-    workflowId: requirePositiveInteger(raw.workflowId, "workflowId"),
-    isnextflow: requireIsnextflow(raw.isnextflow),
-    publicKeySpkiBase64: String(raw.publicKeySpkiBase64 || "").replace(/\s+/g, ""),
-    attachmentFieldName: String(raw.attachmentFieldName || "").trim(),
-    pendingTtlHours: requirePositiveInteger(raw.pendingTtlHours, "pendingTtlHours"),
+    active: parseBoolean(setting("OA_ACTIVE", raw.active, false), "OA_ACTIVE"),
+    baseUrl: validateBaseUrl(setting("OA_BASE_URL", raw.baseUrl, "https://adtekoa.com")),
+    appId: String(setting("OA_APP_ID", raw.appId, "")).trim(),
+    workflowId: requirePositiveInteger(setting("OA_WORKFLOW_ID", raw.workflowId, 602), "OA_WORKFLOW_ID"),
+    isnextflow: requireIsnextflow(setting("OA_ISNEXTFLOW", raw.isnextflow, "0")),
+    publicKeySpkiBase64: String(setting("OA_PUBLIC_KEY", raw.publicKeySpkiBase64, "")).replace(/\s+/g, ""),
+    attachmentFieldName: String(setting("OA_ATTACHMENT_FIELD", raw.attachmentFieldName, "scfj")).trim(),
+    pendingTtlHours: requirePositiveInteger(setting("OA_PENDING_TTL_HOURS", raw.pendingTtlHours, 24), "OA_PENDING_TTL_HOURS"),
     // 建单前附件缓冲，对齐 OpenClaw 空闲 30 分钟开新会话；`/new` / session_end 会立刻清掉。
-    inboxTtlMinutes: requirePositiveInteger(raw.inboxTtlMinutes ?? DEFAULT_INBOX_TTL_MINUTES, "inboxTtlMinutes"),
-    maxAttachmentBytes: requirePositiveInteger(raw.maxAttachmentBytes, "maxAttachmentBytes"),
-    maxTotalAttachmentBytes: requirePositiveInteger(raw.maxTotalAttachmentBytes, "maxTotalAttachmentBytes"),
+    inboxTtlMinutes: requirePositiveInteger(
+      setting("OA_INBOX_TTL_MINUTES", raw.inboxTtlMinutes, DEFAULT_INBOX_TTL_MINUTES),
+      "OA_INBOX_TTL_MINUTES",
+    ),
+    maxAttachmentBytes: requirePositiveInteger(
+      setting("OA_MAX_ATTACHMENT_BYTES", raw.maxAttachmentBytes, 10 * 1024 * 1024),
+      "OA_MAX_ATTACHMENT_BYTES",
+    ),
+    maxTotalAttachmentBytes: requirePositiveInteger(
+      setting("OA_MAX_TOTAL_ATTACHMENT_BYTES", raw.maxTotalAttachmentBytes, 25 * 1024 * 1024),
+      "OA_MAX_TOTAL_ATTACHMENT_BYTES",
+    ),
     mysql: loadMysqlConfig(raw, env),
-    identity: loadIdentityConfig(raw),
+    identity: { adapter },
   };
   if (!/^[A-Za-z0-9._-]{2,64}$/.test(config.appId)) {
-    throw new Error("Invalid OA appId");
+    throw new Error("OA_APP_ID is missing or invalid");
   }
   if (!/^[A-Za-z0-9+/=]{300,800}$/.test(config.publicKeySpkiBase64)) {
-    throw new Error("Invalid OA RSA public key");
+    throw new Error("OA_PUBLIC_KEY is missing or invalid");
   }
   if (config.attachmentFieldName && !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(config.attachmentFieldName)) {
-    throw new Error("Invalid OA attachment field name");
+    throw new Error("Invalid OA_ATTACHMENT_FIELD");
   }
   return config;
 }

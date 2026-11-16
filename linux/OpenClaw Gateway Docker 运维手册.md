@@ -22,7 +22,6 @@
 | `skills` / `bootstrapMaxChars` | `restart`，再在企微 `/new`（旧会话缓存截断结果） |
 | 工作区规则 `AGENTS.md` 等 | 下一轮对话生效；建议 `/new` |
 | `~/xa/.env`、compose、`plugins.load.paths`、端口 / bind | `docker compose up -d`（compose 发现变化会自动重建容器；`restart` 读不到新的 `.env`） |
-| `~/xa/oa-bridge-config.json` | `docker compose restart`（只读挂载，不必重建镜像） |
 | OA 插件代码、`systems.json` | 重建镜像（建议新 tag），改 compose `image:`，`up -d` |
 
 改 json 前先 `config validate`。禁止在容器里 `onboard` / `setup`，禁止用 `config set` 把 `${VAR}` 覆盖成明文。Control UI 若写出 `~/xa/config/agents/itservicedeskagent/agent/models.json`（可能含明文 Key），删掉后 `restart`。
@@ -100,14 +99,14 @@ docker logs --since 30m --timestamps xa-gateway
 
 | 必须备份 | 可重建 |
 | --- | --- |
-| `~/xa` 下 `docker-compose.yml`、`.env`、`config/`（含已装的企微插件）、`workspace/`、`oa-bridge-config.json` | 镜像（按仓库重建） |
+| `~/xa` 下 `docker-compose.yml`、`.env`、`config/`（含已装的企微插件）、`workspace/` | 镜像（按仓库重建） |
 | MySQL `xa_oa`（`mysqldump`，见安装手册第 3 节） | 容器 |
 
 ```bash
 STAMP="$(date +%Y%m%d-%H%M%S)"; mkdir -p ~/xa-backups
 cd ~/xa && docker compose stop
 tar --exclude='xa/extensions' -czf ~/xa-backups/xa-${STAMP}.tar.gz -C ~ \
-  xa/docker-compose.yml xa/.env xa/config xa/workspace xa/oa-bridge-config.json
+  xa/docker-compose.yml xa/.env xa/config xa/workspace
 docker compose start
 ```
 
@@ -261,7 +260,7 @@ UPDATE xa_oa.oa_ticket
 
 ## 12. 旧部署迁到 `.env`（一次性）
 
-2026-11 之前装的环境用的是 `~/xa/secrets/*.txt` + `entrypoint.sh`。迁移只换凭据来源和运行身份，`openclaw.json`、工作区、MySQL 数据都不动。约 10 分钟，期间机器人不回消息。
+2026-11 之前装的环境用的是 `~/xa/secrets/*.txt` + `entrypoint.sh`。迁移只换配置来源和运行身份，`openclaw.json`、工作区、MySQL 数据都不动。约 10 分钟，期间机器人不回消息。
 
 1. 拉新仓库，按安装手册第 5 节**重新构建镜像**（新 Dockerfile 才允许任意 uid 运行）。
 2. 把 secret 文件转成 `.env`（在 `~/xa` 下执行；secret 文件属主是 1000，所以用 sudo 读）：
@@ -282,14 +281,24 @@ UPDATE xa_oa.oa_ticket
        if "'" in value:
            raise SystemExit(f"{file}.txt 含单引号，请手工写进 .env")
        lines.append(f"{var}='{value}'")
-   # 数据库连接参数从旧 oa-bridge-config.json 搬过来，并把该段删掉
-   bridge = pathlib.Path("oa-bridge-config.json")
-   cfg = json.loads(bridge.read_text())
-   mysql = cfg.pop("mysql", {})
-   for key, var in [("host", "OA_MYSQL_HOST"), ("port", "OA_MYSQL_PORT"), ("user", "OA_MYSQL_USER"), ("database", "OA_MYSQL_DATABASE")]:
-       if mysql.get(key) not in (None, ""):
-           lines.append(f"{var}='{mysql[key]}'")
-   bridge.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n")
+   # 旧 oa-bridge-config.json 里的配置也搬过来（流程号、时长等若和默认值一样就不用搬）
+   cfg = json.loads(pathlib.Path("oa-bridge-config.json").read_text())
+   mysql = cfg.get("mysql", {})
+   moved = {
+       "OA_APP_ID": cfg.get("appId"), "OA_PUBLIC_KEY": cfg.get("publicKeySpkiBase64"),
+       "OA_ACTIVE": str(cfg.get("active") is True).lower(), "OA_ISNEXTFLOW": cfg.get("isnextflow"),
+       "OA_IDENTITY_ADAPTER": (cfg.get("identity") or {}).get("adapter"),
+       "OA_MYSQL_HOST": mysql.get("host"), "OA_MYSQL_PORT": mysql.get("port"),
+       "OA_MYSQL_USER": mysql.get("user"), "OA_MYSQL_DATABASE": mysql.get("database"),
+   }
+   for var, value in moved.items():
+       if value not in (None, ""):
+           lines.append(f"{var}='{value}'")
+   defaults = {"workflowId": 602, "attachmentFieldName": "scfj", "pendingTtlHours": 24, "inboxTtlMinutes": 30,
+               "maxAttachmentBytes": 10485760, "maxTotalAttachmentBytes": 26214400}
+   for key, value in defaults.items():
+       if key in cfg and cfg[key] != value:
+           print(f"注意：{key}={cfg[key]} 和默认值不同，请手工加到 .env（变量名见 OA 接入手册第 4 节）")
    env = pathlib.Path(".env")
    env.write_text("\n".join(lines) + "\n")
    os.chown(env, int(os.environ["XA_UID"]), int(os.environ["XA_GID"]))
@@ -298,7 +307,7 @@ UPDATE xa_oa.oa_ticket
    EOF
    ```
 
-   `model_ref.txt` 不再需要（compose 自动拼 `bailian/<模型 ID>`）。数据库主机、端口、账号、库名从 `oa-bridge-config.json` 搬进 `.env`，并从该文件删掉。
+   `model_ref.txt` 不再需要（compose 自动拼 `bailian/<模型 ID>`）。`oa-bridge-config.json` 里的 appId、公钥、建单开关、流转开关、数据库连接一并搬进 `.env`；新 compose 不再挂这个文件。
 3. 换 compose，停旧容器，文件属主改成自己（只此一次）：
 
    ```bash
@@ -317,7 +326,7 @@ UPDATE xa_oa.oa_ticket
 5. 都正常后删旧文件：
 
    ```bash
-   rm -rf ~/xa/secrets ~/xa/entrypoint.sh ~/xa/docker-compose.yml.old
+   rm -rf ~/xa/secrets ~/xa/entrypoint.sh ~/xa/docker-compose.yml.old ~/xa/oa-bridge-config.json
    ```
 
 回滚（第 5 步之前）：`docker compose down`，`mv docker-compose.yml.old docker-compose.yml`，`sudo chown -R 1000:1000 ~/xa`，`docker compose up -d`。旧 compose 用的镜像 tag 如果被新构建覆盖了，旧 compose 也能用新镜像跑（以 uid 1000 运行）。

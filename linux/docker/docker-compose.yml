@@ -16,7 +16,7 @@ services:
       HOME: /home/node
       OPENCLAW_GATEWAY_BIND: lan
       OPENCLAW_STATE_DIR: /home/node/.openclaw
-      # 凭据全部来自同目录的 .env（模板 docker/.env.example）。缺任何一项，docker compose 直接报错，不会带空值启动
+      # 全部配置来自同目录的 .env（模板 docker/.env.example）。必填项缺了，docker compose 直接报错，不会带空值启动
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:?.env 缺 OPENCLAW_GATEWAY_TOKEN}
       XA_IT_WECOM_BOT_ID: ${XA_IT_WECOM_BOT_ID:?.env 缺 XA_IT_WECOM_BOT_ID}
       XA_IT_WECOM_BOT_SECRET: ${XA_IT_WECOM_BOT_SECRET:?.env 缺 XA_IT_WECOM_BOT_SECRET}
@@ -31,6 +31,19 @@ services:
       OA_MYSQL_DATABASE: ${OA_MYSQL_DATABASE:-xa_oa}
       OA_MYSQL_PASSWORD: ${OA_MYSQL_PASSWORD:?.env 缺 OA_MYSQL_PASSWORD}
       OA_API_USER_ID: ${OA_API_USER_ID:?.env 缺 OA_API_USER_ID}
+      OA_APP_ID: ${OA_APP_ID:?.env 缺 OA_APP_ID}
+      OA_PUBLIC_KEY: ${OA_PUBLIC_KEY:?.env 缺 OA_PUBLIC_KEY}
+      OA_ACTIVE: ${OA_ACTIVE:-false}
+      OA_ISNEXTFLOW: ${OA_ISNEXTFLOW:-0}
+      OA_IDENTITY_ADAPTER: ${OA_IDENTITY_ADAPTER:-on}
+      # 下面这些全公司固定，留空用插件默认值（https://adtekoa.com、602、scfj、24 小时、30 分钟、10MB、25MB）
+      OA_BASE_URL: ${OA_BASE_URL:-}
+      OA_WORKFLOW_ID: ${OA_WORKFLOW_ID:-}
+      OA_ATTACHMENT_FIELD: ${OA_ATTACHMENT_FIELD:-}
+      OA_PENDING_TTL_HOURS: ${OA_PENDING_TTL_HOURS:-}
+      OA_INBOX_TTL_MINUTES: ${OA_INBOX_TTL_MINUTES:-}
+      OA_MAX_ATTACHMENT_BYTES: ${OA_MAX_ATTACHMENT_BYTES:-}
+      OA_MAX_TOTAL_ATTACHMENT_BYTES: ${OA_MAX_TOTAL_ATTACHMENT_BYTES:-}
       OA_APP_SECRET: ${OA_APP_SECRET:?.env 缺 OA_APP_SECRET}
       WECOM_IDENTITY_CORPID: ${WECOM_IDENTITY_CORPID:?.env 缺 WECOM_IDENTITY_CORPID}
       WECOM_IDENTITY_SECRET: ${WECOM_IDENTITY_SECRET:?.env 缺 WECOM_IDENTITY_SECRET}
@@ -38,8 +51,6 @@ services:
       - ./config:/home/node/.openclaw
       - ./workspace:/home/node/.openclaw/workspace
       - ./extensions:/home/node/.openclaw/extensions
-      # OA 桥接业务配置（appId、公钥、建单开关等；数据库连接与凭据在 .env）
-      - ./oa-bridge-config.json:/opt/xa/oa-workflow-bridge/bridge-config.json:ro
     # 只走本机 / SSH 隧道
     ports:
       - "127.0.0.1:18789:18789"

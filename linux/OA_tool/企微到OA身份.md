@@ -13,7 +13,7 @@
 
 | 名称 | 形态 | 放在哪 | 用在哪 |
 | --- | --- | --- | --- |
-| appid | 如 `2026-09-01-xxxx` | `oa-bridge-config.json` 的 `appId` | 每个 Ecology 请求 Header `appid` |
+| appid | 如 `2026-09-01-xxxx` | `.env` 的 `OA_APP_ID` | 每个 Ecology 请求 Header `appid` |
 | AppSecret | UUID 形态 | `.env` 的 `OA_APP_SECRET` | 只在 `applytoken` 时 RSA 加密后用 |
 | 接口账号人员 id | 1–18 位数字 | `.env` 的 `OA_API_USER_ID` | 只用于只读预检 Header `userid` |
 | **申请人人员 id** | 1–18 位数字 | `oa_identity` 缓存、工单 `oa_requester_id` | 建单 Header `userid`（RSA）、表单 `xqsqr`、提交前 `getHrmSimpleInfo` |
@@ -44,7 +44,7 @@ docker logs xa-gateway --since 10m 2>&1 | grep -E 'aibot_msg_callback|"userid"'
 
 ## 4. 转换流水线
 
-代码在 `oa-workflow-bridge/src/identity/`，是 Gateway 进程内模块，由 `prepare` 调用；不是独立服务，不注册工具。开关 `bridge-config.json` 的 `identity.adapter`（现网 `on`）。
+代码在 `oa-workflow-bridge/src/identity/`，是 Gateway 进程内模块，由 `prepare` 调用；不是独立服务，不注册工具。开关 `.env` 的 `OA_IDENTITY_ADAPTER`（默认 `on`）。
 
 | 序 | 动作 | 失败码 |
 | --- | --- | --- |
@@ -89,7 +89,7 @@ docker exec -it xa-gateway node /opt/xa/oa-workflow-bridge/scripts/manual-resolv
 
 | 位置 | 内容 |
 | --- | --- |
-| `oa-bridge-config.json` | `appId`、`publicKeySpkiBase64`（新应用给了新公钥要换）、`"identity": {"adapter": "on"}` |
+| `.env` 的 `OA_APP_ID`、`OA_PUBLIC_KEY` | 应用与公钥（新应用给了新公钥要换） |
 | `.env` 的 `OA_APP_SECRET`、`OA_API_USER_ID` | OA 凭据 |
 | `.env` 的 `WECOM_IDENTITY_CORPID`、`WECOM_IDENTITY_SECRET` | 企微**自建应用**凭据（不是机器人 BotSecret）；员工要在该应用可见范围内 |
 | `openclaw.json` | 不涉及 |

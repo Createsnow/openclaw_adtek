@@ -106,7 +106,7 @@ agents.entries.itservicedeskagent
 | `load.paths` | `/opt/xa/oa-workflow-bridge` | OA 插件在镜像里；企微插件 npm 托管，不写路径。启动时读取，改了要重启 |
 | `entries.*.hooks.allowConversationAccess` | 两个插件都 `true` | OA 桥接要收 `message_received` 等事件落附件；企微不开会 `before_prompt_build blocked` |
 
-OA 建单开关、身份转换开关都不在本文件，在 `oa-bridge-config.json`（`active`、`identity.adapter`）。
+OA 建单开关、身份转换开关都不在本文件，在 `.env`（`OA_ACTIVE`、`OA_IDENTITY_ADAPTER`）。
 
 ## 9. 改配置前
 
@@ -115,7 +115,7 @@ OA 建单开关、身份转换开关都不在本文件，在 `oa-bridge-config.j
 | 关 Codex | `plugins.deny` + `entries.codex.enabled: false` | 只从 allow 删掉 |
 | 关 Skill | 两处 `skills: []`，重启 + `/new` | 只在 `skills.entries` 点名关 |
 | 关企微收发 | 关 `channels.wecom.enabled` 或插件 entries | 去掉 `wecom_mcp` |
-| 暂停建单 | `oa-bridge-config.json` 的 `active: false` | 把 `oa_workflow` 移出白名单 |
+| 暂停建单 | `.env` 的 `OA_ACTIVE=false`，`docker compose up -d` | 把 `oa_workflow` 移出白名单 |
 | 让模型看图 | 不做 | 打开 `read` / `tools.media` / `imageModel` |
 | 换模型 | 只改 `.env` 的 `XA_DOMESTIC_MODEL_ID` | `config set` 写明文 |
 | 迁旧 `agents.list` | 备份后 `doctor --fix`，再 `config validate` | `list` 和 `entries` 混写 |

@@ -23,7 +23,6 @@ compose、Dockerfile、`.env` 模板、`openclaw.json` 都以仓库文件为准�
 ~/xa/config                → /home/node/.openclaw
 ~/xa/workspace             → /home/node/.openclaw/workspace
 ~/xa/extensions            → /home/node/.openclaw/extensions
-~/xa/oa-bridge-config.json → /opt/xa/oa-workflow-bridge/bridge-config.json（只读）
 ~/xa/.env                  → 由 docker compose 读取，注入为容器环境变量
 ```
 
@@ -82,7 +81,6 @@ mkdir -p ~/xa/config ~/xa/workspace ~/xa/extensions
 cp -r "$REPO/workspace-rules/workspace/." ~/xa/workspace/
 cp "$REPO/docker/docker-compose.yml" ~/xa/
 cp "$REPO/docker/.env.example" ~/xa/.env
-cp "$REPO/OA_tool/oa-workflow-bridge/bridge-config.example.json" ~/xa/oa-bridge-config.json
 ```
 
 `~/xa/workspace/MEMORY.md` 必须存在（缺了群聊寒暄会多跑一轮模型）。
@@ -121,11 +119,15 @@ Gateway 虚机上验证：`nc -vz <MySQL 主机> 3306`。
 | `OA_MYSQL_HOST` | 第 3 节 MySQL 机器的内网 IP 或域名 |
 | `OA_MYSQL_PORT` / `OA_MYSQL_USER` / `OA_MYSQL_DATABASE` | 已预填 `3306` / `xa_oa` / `xa_oa`，和 DBA 建的不一样时再改 |
 | `OA_MYSQL_PASSWORD` | 第 3 节的密码 |
+| `OA_APP_ID` / `OA_PUBLIC_KEY` | OA 管理员给的 appid 和 RSA 公钥（公钥写成一整行 base64） |
 | `OA_APP_SECRET` / `OA_API_USER_ID` | OA AppSecret；接口账号人员 id（纯数字，只用于只读预检，不是申请人） |
+| `OA_ACTIVE` | 初装保持 `false`：员工能走完确认，但不会真的往 OA 建单。联调完改 `true` |
+| `OA_ISNEXTFLOW` | `0` 建单后停在申请人节点（现网生产测试），`1` 自动流转到处理人 |
 | `WECOM_IDENTITY_CORPID` / `WECOM_IDENTITY_SECRET` | 企微**自建应用**凭据（身份转换用，不是机器人 BotSecret） |
 
 - 值里有 `$`、`#`、空格、引号时，用单引号括起来：`OA_MYSQL_PASSWORD='p@ss$word#1'`。
-- 任何一项空着，`docker compose` 会直接报 `.env 缺 XXX`，不会带空值启动。
+- 必填项空着，`docker compose` 会直接报 `.env 缺 XXX`，不会带空值启动。
+- OA 地址、流程 602、附件字段、时长、附件上限有插件默认值，不用填；需要改时变量名见 [OA 接入手册](OA_tool/OA%20Workflow%20Bridge%20接入手册.md) 第 4 节。
 - `XA_DOMESTIC_*` 是历史命名，与 Provider 键无关。
 - `.env` 不进 git、不发群。机器上除了运维还有别人能登录时，执行一次 `chmod 600 ~/xa/.env`。
 
@@ -144,9 +146,7 @@ docker run --rm --entrypoint ls xa-gateway-oa:2026.9.2 /opt/xa/oa-workflow-bridg
 
 ## 6. 写配置
 
-**`~/xa/oa-bridge-config.json`**：只填 OA 业务配置 `appId`、`publicKeySpkiBase64`（数据库连接已在 `.env`）。初装 `active: false`，`isnextflow: "0"`。字段见 [OA 接入手册](OA_tool/OA%20Workflow%20Bridge%20接入手册.md) 第 4 节。
-
-**`~/xa/config/openclaw.json`**：用仓库样例，先去掉 `channels` 和 `bindings`（企微插件还没装，写了会 `unknown channel id: wecom`，容器反复重启）：
+部署要改的值都已在 `.env` 里，这里只剩 `~/xa/config/openclaw.json`：用仓库样例，先去掉 `channels` 和 `bindings`（企微插件还没装，写了会 `unknown channel id: wecom`，容器反复重启）：
 
 ```bash
 python3 - <<'EOF'
@@ -240,7 +240,7 @@ oc agents list --bindings                    # wecom/default → itservicedeskag
 2. 测试机器人私聊「你是谁」：1～2 秒出「思考中」，几秒内回固定自我介绍。
 3. 报一个问题，出确认卡；回 `2` 取消。
 4. 发图：日志无 `apply_media_understanding`，回复不描述图片内容。
-5. 要真正建单时把 `oa-bridge-config.json` 的 `active` 改 `true`，`docker compose restart`，确认后拿到数字 `requestId`。
+5. 要真正建单时把 `.env` 的 `OA_ACTIVE` 改成 `true`，`docker compose up -d`，确认后拿到数字 `requestId`。
 
 装完后放好 inbound 清理 cron（运维手册第 7 节），否则 `media/inbound` 会一直涨。
 

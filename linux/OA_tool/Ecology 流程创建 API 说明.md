@@ -12,7 +12,7 @@
 
 ## 1. RSA 加密
 
-用 OA 给的 RSA 公钥（`oa-bridge-config.json` 的 `publicKeySpkiBase64`）分别加密 secret 和 userid：
+用 OA 给的 RSA 公钥（`.env` 的 `OA_PUBLIC_KEY`）分别加密 secret 和 userid：
 
 ```java
 String secretEncry = rsa.encrypt(null, secret, null, "utf-8", spk, false);   // 换 token 用
@@ -57,7 +57,7 @@ Header：`token`、`appid`、`userid` = RSA(**申请人**人员 id，与 `xqsqr`
 
 成功 = `code=SUCCESS` 且有数字 `data.requestid`。网络中断、5xx、没有单号都算结果不明（插件记 `unknown`，禁止自动重试）。
 
-`otherParams`：`isnextflow` 取自配置，只允许 `"0"` / `"1"`。现网 `"0"` = 建单成功但停在申请人节点（生产测试开关，不是失败）；`"1"` = 自动流转。`delReqFlowFaild`、`isVerifyPer` 固定 `"1"`。
+`otherParams`：`isnextflow` 取自 `.env` 的 `OA_ISNEXTFLOW`，只允许 `"0"` / `"1"`。现网 `"0"` = 建单成功但停在申请人节点（生产测试开关，不是失败）；`"1"` = 自动流转。`delReqFlowFaild`、`isVerifyPer` 固定 `"1"`。
 
 `mainData` 字段（`fieldValue` 一律字符串）：
 

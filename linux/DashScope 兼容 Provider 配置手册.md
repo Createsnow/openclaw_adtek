@@ -74,7 +74,7 @@ API Key、Base URL、模型必须同一地域：
 
 只换模型：改 `.env` 的 `XA_DOMESTIC_MODEL_ID`，`docker compose up -d`，看 `agent model` 日志。json 不用改。换 Base URL / Key 同理只改 `.env`。
 
-换模型时不要同时改 OA `active`、规则或插件，否则分不清是谁的问题。回归要点：
+换模型时不要同时改 `OA_ACTIVE`、规则或插件，否则分不清是谁的问题。回归要点：
 
 - `prepare` →（`attach`）→ `submit_confirmed` 参数符合 Schema，不加未定义字段。
 - 调工具前不播报内部步骤；员工回复原样转发 `replyZh`。
