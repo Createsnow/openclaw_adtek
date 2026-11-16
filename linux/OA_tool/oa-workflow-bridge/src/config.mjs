@@ -1,7 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-const CONFIG_URL = new URL("../bridge-config.json", import.meta.url);
 const SYSTEMS_URL = new URL("../systems.json", import.meta.url);
 
 export const TICKET_TYPE_NAMES = Object.freeze(["运维支持", "权限申请", "IT需求"]);
@@ -52,57 +51,85 @@ function validateBaseUrl(value) {
   return "https://adtekoa.com";
 }
 
-/** MySQL 连接参数（非机密）。密码只从环境变量 OA_MYSQL_PASSWORD 读。 */
-function loadMysqlConfig(raw) {
-  const mysql = raw?.mysql && typeof raw.mysql === "object" ? raw.mysql : {};
+function envText(env, name) {
+  return String(env?.[name] ?? "").trim();
+}
+
+/** 环境变量有值就用它，否则用默认值。 */
+function setting(env, name, fallback) {
+  return envText(env, name) || fallback;
+}
+
+function parseBoolean(value, label) {
+  const text = String(value ?? "").trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(text)) return true;
+  if (["false", "0", "no", "off", ""].includes(text)) return false;
+  throw new Error(`${label} must be true or false`);
+}
+
+/**
+ * MySQL 连接参数：OA_MYSQL_HOST / OA_MYSQL_PORT（默认 3306）/ OA_MYSQL_USER / OA_MYSQL_DATABASE。
+ * 部署时都写在 .env。密码只从 OA_MYSQL_PASSWORD 读（见 db.mjs）。
+ */
+export function loadMysqlConfig(env = process.env) {
   const config = {
-    host: String(mysql.host || "").trim(),
-    port: requirePositiveInteger(mysql.port ?? 3306, "mysql.port"),
-    user: String(mysql.user || "").trim(),
-    database: String(mysql.database || "").trim(),
+    host: envText(env, "OA_MYSQL_HOST"),
+    port: requirePositiveInteger(setting(env, "OA_MYSQL_PORT", 3306), "OA_MYSQL_PORT"),
+    user: envText(env, "OA_MYSQL_USER"),
+    database: envText(env, "OA_MYSQL_DATABASE"),
   };
-  if (!/^[A-Za-z0-9.-]{1,253}$/.test(config.host)) throw new Error("mysql.host is required");
-  if (!/^[A-Za-z0-9_.-]{1,32}$/.test(config.user)) throw new Error("mysql.user is required");
-  if (!/^[A-Za-z0-9_]{1,64}$/.test(config.database)) throw new Error("mysql.database is required");
+  if (!/^[A-Za-z0-9.-]{1,253}$/.test(config.host)) throw new Error("OA_MYSQL_HOST is required");
+  if (!/^[A-Za-z0-9_.-]{1,32}$/.test(config.user)) throw new Error("OA_MYSQL_USER is required");
+  if (!/^[A-Za-z0-9_]{1,64}$/.test(config.database)) throw new Error("OA_MYSQL_DATABASE is required");
   return config;
 }
 
-function loadIdentityConfig(raw) {
-  const adapter = String(raw?.identity?.adapter || "on").trim().toLowerCase();
-  if (adapter !== "on" && adapter !== "off") {
-    throw new Error("identity.adapter must be on or off");
-  }
-  return { adapter };
-}
-
-export async function loadBridgeConfig() {
-  const raw = await readJsonFile(CONFIG_URL);
+/**
+ * 插件配置，全部来自环境变量（部署时写在 .env）：
+ * - 每套环境都要填：OA_APP_ID、OA_PUBLIC_KEY；按需改：OA_ACTIVE（默认 false）、OA_ISNEXTFLOW（默认 "0"）
+ * - 全公司固定、一般不改：OA_BASE_URL、OA_WORKFLOW_ID、OA_ATTACHMENT_FIELD、OA_PENDING_TTL_HOURS、
+ *   OA_INBOX_TTL_MINUTES、OA_MAX_ATTACHMENT_BYTES、OA_MAX_TOTAL_ATTACHMENT_BYTES、OA_IDENTITY_ADAPTER
+ * - 可选：OA_WITHDRAW_AS_MONITOR（默认 false，撤回已提交工单时是否用接口账号的监控权限）
+ */
+export async function loadBridgeConfig({ env = process.env } = {}) {
+  const get = (name, fallback) => setting(env, name, fallback);
+  const adapter = String(get("OA_IDENTITY_ADAPTER", "on")).toLowerCase();
+  if (adapter !== "on" && adapter !== "off") throw new Error("OA_IDENTITY_ADAPTER must be on or off");
   const config = {
-    active: raw.active === true,
-    baseUrl: validateBaseUrl(raw.baseUrl),
-    appId: String(raw.appId || "").trim(),
-    workflowId: requirePositiveInteger(raw.workflowId, "workflowId"),
-    isnextflow: requireIsnextflow(raw.isnextflow),
-    publicKeySpkiBase64: String(raw.publicKeySpkiBase64 || "").replace(/\s+/g, ""),
-    attachmentFieldName: String(raw.attachmentFieldName || "").trim(),
-    pendingTtlHours: requirePositiveInteger(raw.pendingTtlHours, "pendingTtlHours"),
+    active: parseBoolean(get("OA_ACTIVE", false), "OA_ACTIVE"),
+    baseUrl: validateBaseUrl(get("OA_BASE_URL", "https://adtekoa.com")),
+    appId: String(get("OA_APP_ID", "")).trim(),
+    workflowId: requirePositiveInteger(get("OA_WORKFLOW_ID", 602), "OA_WORKFLOW_ID"),
+    isnextflow: requireIsnextflow(get("OA_ISNEXTFLOW", "0")),
+    publicKeySpkiBase64: String(get("OA_PUBLIC_KEY", "")).replace(/\s+/g, ""),
+    attachmentFieldName: String(get("OA_ATTACHMENT_FIELD", "scfj")).trim(),
+    pendingTtlHours: requirePositiveInteger(get("OA_PENDING_TTL_HOURS", 24), "OA_PENDING_TTL_HOURS"),
     // 建单前附件缓冲，对齐 OpenClaw 空闲 30 分钟开新会话；`/new` / session_end 会立刻清掉。
-    inboxTtlMinutes: requirePositiveInteger(raw.inboxTtlMinutes ?? DEFAULT_INBOX_TTL_MINUTES, "inboxTtlMinutes"),
-    maxAttachmentBytes: requirePositiveInteger(raw.maxAttachmentBytes, "maxAttachmentBytes"),
-    maxTotalAttachmentBytes: requirePositiveInteger(raw.maxTotalAttachmentBytes, "maxTotalAttachmentBytes"),
-    mysql: loadMysqlConfig(raw),
-    identity: loadIdentityConfig(raw),
+    inboxTtlMinutes: requirePositiveInteger(
+      get("OA_INBOX_TTL_MINUTES", DEFAULT_INBOX_TTL_MINUTES),
+      "OA_INBOX_TTL_MINUTES",
+    ),
+    maxAttachmentBytes: requirePositiveInteger(
+      get("OA_MAX_ATTACHMENT_BYTES", 10 * 1024 * 1024),
+      "OA_MAX_ATTACHMENT_BYTES",
+    ),
+    maxTotalAttachmentBytes: requirePositiveInteger(
+      get("OA_MAX_TOTAL_ATTACHMENT_BYTES", 25 * 1024 * 1024),
+      "OA_MAX_TOTAL_ATTACHMENT_BYTES",
+    ),
+    mysql: loadMysqlConfig(env),
+    identity: { adapter },
     // 撤回已提交工单：默认以申请人身份收回；true 时以接口账号 + 监控权限收回（接口账号须有该流程的监控权限）。
-    withdrawAsMonitor: raw.withdrawAsMonitor === true,
+    withdrawAsMonitor: parseBoolean(get("OA_WITHDRAW_AS_MONITOR", false), "OA_WITHDRAW_AS_MONITOR"),
   };
   if (!/^[A-Za-z0-9._-]{2,64}$/.test(config.appId)) {
-    throw new Error("Invalid OA appId");
+    throw new Error("OA_APP_ID is missing or invalid");
   }
   if (!/^[A-Za-z0-9+/=]{300,800}$/.test(config.publicKeySpkiBase64)) {
-    throw new Error("Invalid OA RSA public key");
+    throw new Error("OA_PUBLIC_KEY is missing or invalid");
   }
   if (config.attachmentFieldName && !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(config.attachmentFieldName)) {
-    throw new Error("Invalid OA attachment field name");
+    throw new Error("Invalid OA_ATTACHMENT_FIELD");
   }
   return config;
 }

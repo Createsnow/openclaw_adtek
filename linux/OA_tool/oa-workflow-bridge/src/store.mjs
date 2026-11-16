@@ -15,7 +15,7 @@ export function createStore(db, { now = () => Date.now() } = {}) {
 
 export { ACTIVE_TICKET_STATUSES };
 const ACTIVE = new Set(ACTIVE_TICKET_STATUSES);
-/** 进入这些状态后清掉描述与附件清单，只留台账（单号、状态、时间）。 */
+/** 进入这些状态后清掉描述与附件清单，只留台账（单号、类型、系统、地点、状态、时间）。 */
 const TERMINAL = new Set(["submitted", "cancelled", "expired", "failed", "withdrawn"]);
 /** 查进度「最近记录」列出的状态与条数。 */
 const RECENT_STATUSES = ["submitted", "cancelled", "expired", "failed", "unknown", "withdrawn"];
@@ -55,10 +55,14 @@ function rowToTicket(row) {
     session: row.session_code,
     status: row.status,
     oaRequesterId: row.oa_requester_id || "",
+    ticketType: row.ticket_type || null,
+    systemName: row.system_name || null,
+    location: row.location || null,
     draft: parseJson(row.draft_json, null),
     staged: parseJson(row.staged_json, []),
     requestId: row.request_id || null,
     errorCode: row.error_code || null,
+    submittedAt: row.submitted_at ? Number(row.submitted_at) : null,
     expiresAt: Number(row.expires_at),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
@@ -132,8 +136,8 @@ export async function insertTicket(store, ticket) {
   const now = Date.now();
   await store.db.run(
     `INSERT INTO oa_ticket (confirmation_id, external_ticket_id, sender_code, session_code, status, active_sender,
-      oa_requester_id, draft_json, staged_json, expires_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'awaiting_confirmation', ?, ?, ?, ?, ?, ?, ?)`,
+      oa_requester_id, ticket_type, system_name, location, draft_json, staged_json, expires_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'awaiting_confirmation', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       ticket.confirmationId,
       ticket.draft.externalTicketId,
@@ -141,6 +145,9 @@ export async function insertTicket(store, ticket) {
       ticket.session,
       ticket.identity,
       ticket.oaRequesterId,
+      ticket.draft.ticketType || null,
+      ticket.draft.systemName || null,
+      ticket.draft.location || null,
       JSON.stringify(ticket.draft),
       JSON.stringify(ticket.staged || []),
       ticket.expiresAt,
@@ -155,12 +162,17 @@ export async function insertTicket(store, ticket) {
  * `expectStatus` 给了就只在当前状态匹配时才改，返回是否改到。
  */
 export async function updateTicket(store, confirmationId, { status, staged, requestId, errorCode, expectStatus } = {}) {
+  const now = Date.now();
   const sets = ["updated_at = ?"];
-  const params = [Date.now()];
+  const params = [now];
   if (status) {
     sets.push("status = ?", ACTIVE.has(status) ? "active_sender = sender_code" : "active_sender = NULL");
     params.push(status);
     if (TERMINAL.has(status)) sets.push("draft_json = NULL", "staged_json = NULL");
+    if (status === "submitted") {
+      sets.push("submitted_at = COALESCE(submitted_at, ?)");
+      params.push(now);
+    }
   }
   if (staged && !TERMINAL.has(status)) {
     sets.push("staged_json = ?");
@@ -239,8 +251,8 @@ export async function deleteSessionInbox(store, stateDir, identity, session) {
 export async function discardUnpreparedInbox({ store, stateDir, source, logger }) {
   const sender = senderIdOf(source);
   if (!sender || !store) return { wiped: false };
-  return withStateLock(store, async () => {
-    const identity = identityCode(sender);
+  const identity = identityCode(sender);
+  return withSenderLock(identity, async () => {
     const existed = Boolean(await readInbox(store, identity));
     await deleteInbox(store, stateDir, identity);
     if (existed) logger?.info?.("[oa-workflow-bridge] discarded unprepared inbox");
@@ -267,21 +279,31 @@ export async function setIdentityCache(store, mappingCode, { oaUserId = null, mi
   );
 }
 
-// ---------- 进程内锁（单 Gateway） ----------
+// ---------- 进程内锁（单 Gateway，按人） ----------
 
-let stateQueue = Promise.resolve();
-const stateLockContext = new AsyncLocalStorage();
+/** 每个发送人一条队列：同一人的收附件 / 建单 / 确认 / 取消串行，不同的人互不等待。 */
+const senderQueues = new Map();
+const heldSenderLocks = new AsyncLocalStorage();
 
-export async function withStateLock(_store, callback) {
-  if (stateLockContext.getStore()) return callback();
-  const previous = stateQueue;
+/**
+ * 以发送人码（sender_code）为键的进程内互斥锁，可重入。
+ * 「同一人全局一张待确认」另有库层唯一约束兜底；跨人的数据（孤儿 staging 回收）靠宽限期，不靠锁。
+ */
+export async function withSenderLock(identity, callback) {
+  const key = String(identity || "");
+  if (!key) throw new Error("withSenderLock requires a sender code");
+  const held = heldSenderLocks.getStore();
+  if (held?.has(key)) return callback();
+  const previous = senderQueues.get(key) || Promise.resolve();
   let release;
-  stateQueue = new Promise((resolve) => { release = resolve; });
+  const current = new Promise((resolve) => { release = resolve; });
+  senderQueues.set(key, current);
   await previous;
   try {
-    return await stateLockContext.run(true, callback);
+    return await heldSenderLocks.run(new Set([...(held || []), key]), callback);
   } finally {
     release();
+    if (senderQueues.get(key) === current) senderQueues.delete(key);
   }
 }
 
@@ -315,7 +337,7 @@ export async function removeStagingDirectory(stateDir, confirmationId) {
 
 /** 待确认窗口到期：工单记 expired（清描述 / 附件清单），删该会话 inbox 与本单 staging。 */
 export async function expireTicket(store, stateDir, ticket) {
-  const expired = await withStateLock(store, async () => {
+  const expired = await withSenderLock(ticket.identity, async () => {
     const current = await getTicket(store, ticket.confirmationId);
     if (!isActiveTicket(current) || current.expiresAt > Date.now()) return false;
     await updateTicket(store, current.confirmationId, { status: "expired" });
@@ -336,12 +358,19 @@ export async function cleanupExpired(store, stateDir, now = Date.now()) {
     [now],
   );
   for (const row of overdue) await expireTicket(store, stateDir, rowToTicket(row));
-  await withStateLock(store, async () => {
-    // 过期的 inbox 先留着：员工下一次找机器人时要提示「刚才的图片已过期」（由 inbox.mjs 处理并删除）。
-    // 一天都没人再来的才在这里直接删。
-    const stale = await store.db.query("SELECT sender_code FROM oa_inbox WHERE expires_at <= ?", [store.now() - INBOX_STALE_MS]);
-    for (const row of stale) await deleteInbox(store, stateDir, row.sender_code);
-  });
+  // 过期的 inbox 先留着：员工下一次找机器人时要提示「刚才的图片已过期」（由 inbox.mjs 处理并删除）。
+  // 一天都没人再来的才在这里直接删；拿到这个人的锁后再确认一次，免得删掉刚续上的 inbox。
+  const staleBefore = store.now() - INBOX_STALE_MS;
+  const stale = await store.db.query("SELECT sender_code FROM oa_inbox WHERE expires_at <= ?", [staleBefore]);
+  for (const row of stale) {
+    await withSenderLock(row.sender_code, async () => {
+      const still = await store.db.query(
+        "SELECT 1 FROM oa_inbox WHERE sender_code = ? AND expires_at <= ?",
+        [row.sender_code, staleBefore],
+      );
+      if (still.length) await deleteInbox(store, stateDir, row.sender_code);
+    });
+  }
   await store.db.run("DELETE FROM oa_identity WHERE expires_at <= ?", [store.now()]);
   return overdue.length + await cleanupStagingDirs(store, stateDir, now);
 }

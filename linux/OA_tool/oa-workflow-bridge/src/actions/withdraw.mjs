@@ -11,7 +11,7 @@ import {
   withdrawnCard,
   withdrawUnknownCard,
 } from "../reply.mjs";
-import { getTicketByRequestId, listWithdrawableTickets, updateTicket, withStateLock } from "../store.mjs";
+import { getTicketByRequestId, listWithdrawableTickets, updateTicket, withSenderLock } from "../store.mjs";
 import { fail, maybeCleanup } from "./common.mjs";
 
 /** 同进程里正在撤回的确认单：并发的第二次撤回直接回「正在撤回」，不再打 OA。 */
@@ -80,7 +80,7 @@ function failurePayload(error, requestId) {
  */
 export async function withdraw({ store, stateDir, config, trust, params, logger, deps }) {
   const requestedId = normalizeRequestId(params.requestId);
-  const picked = await withStateLock(store, () => pickTicket(store, trust.identity, requestedId));
+  const picked = await withSenderLock(trust.identity, () => pickTicket(store, trust.identity, requestedId));
   if (picked.reply) return picked.reply;
 
   const { ticket } = picked;
@@ -107,7 +107,7 @@ export async function withdraw({ store, stateDir, config, trust, params, logger,
       return failurePayload(error, requestId);
     }
     try {
-      await withStateLock(store, () => updateTicket(store, ticket.confirmationId, {
+      await withSenderLock(trust.identity, () => updateTicket(store, ticket.confirmationId, {
         status: "withdrawn",
         expectStatus: "submitted",
       }));

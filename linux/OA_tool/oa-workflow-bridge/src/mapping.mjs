@@ -278,7 +278,7 @@ export function buildCreatePayload({ config, draft, oaRequesterId, profile, atta
   return {
     workflowId: config.workflowId,
     requestName,
-    // isnextflow 来自 bridge-config.json；"1" 建单后自动流转，"0" 停在申请人节点。
+    // isnextflow 来自环境变量 OA_ISNEXTFLOW；"1" 建单后自动流转，"0" 停在申请人节点。
     // delReqFlowFaild / isVerifyPer 是 Ecology 协议常量，不做成可配项。
     otherParams: {
       isnextflow: readIsnextflow(config),

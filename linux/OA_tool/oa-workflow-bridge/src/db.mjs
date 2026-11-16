@@ -9,6 +9,8 @@ export const ACTIVE_TICKET_STATUSES = Object.freeze(["awaiting_confirmation", "s
 
 /**
  * oa_ticket：一张确认单一行（待确认 → 提交中 / 待对账 → 已提交 / 已取消 / 已过期 / 被拒）。
+ *   ticket_type / system_name / location 在 prepare 时写入、终态后保留（描述与附件清单才清），供统计与审计。
+ *   submitted_at：OA 返回数字单号的时刻，只在记 submitted 时写一次（人工对账收成已提交时由 DBA 填 OA 建单时间）。
  * active_sender：仍占「同一人全局一张待确认」名额（待确认 / 提交中 / 待对账）时等于 sender_code，
  *   结束后置 NULL；唯一索引在库层面兜底「同一人全局一张」。由 store.mjs 随状态一起写。
  * oa_inbox：每人一行，收到但还没进工单的附件（hook 一收到就落盘入库），带去重键与会话码。
@@ -23,10 +25,14 @@ export const MYSQL_SCHEMA = Object.freeze([
     status             VARCHAR(24)  NOT NULL,
     active_sender      CHAR(24)     NULL,
     oa_requester_id    VARCHAR(18)  NULL,
+    ticket_type        VARCHAR(16)  NULL,
+    system_name        VARCHAR(80)  NULL,
+    location           VARCHAR(8)   NULL,
     draft_json         MEDIUMTEXT   NULL,
     staged_json        TEXT         NULL,
     request_id         VARCHAR(32)  NULL,
     error_code         VARCHAR(64)  NULL,
+    submitted_at       BIGINT       NULL,
     expires_at         BIGINT       NOT NULL,
     created_at         BIGINT       NOT NULL,
     updated_at         BIGINT       NOT NULL,
@@ -55,6 +61,7 @@ export const MYSQL_SCHEMA = Object.freeze([
 
 export const TABLES = Object.freeze(["oa_ticket", "oa_inbox", "oa_identity"]);
 
+
 export async function createMysqlDb(mysqlConfig, { password = process.env.OA_MYSQL_PASSWORD } = {}) {
   if (!String(password || "").trim()) {
     const error = new Error("OA_MYSQL_PASSWORD is not configured");
@@ -69,7 +76,7 @@ export async function createMysqlDb(mysqlConfig, { password = process.env.OA_MYS
     password: String(password).trim(),
     database: mysqlConfig.database,
     charset: "utf8mb4",
-    connectionLimit: 4,
+    connectionLimit: 10,
     connectTimeout: 10_000,
     enableKeepAlive: true,
   });
