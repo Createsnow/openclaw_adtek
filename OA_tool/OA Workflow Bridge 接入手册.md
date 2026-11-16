@@ -1,6 +1,6 @@
 # OA Workflow Bridge 接入手册
 
-OA 桥接插件 `oa-workflow-bridge`（工具 `oa_workflow`）的唯一正文：存储、状态机、工具契约、错误码、预检、排错。部署步骤在[安装手册](../OpenClaw%20Gateway%20Linux%20服务器安装手册.md)，OA 接口在 [Ecology 流程创建 API 说明.md](Ecology%20流程创建%20API%20说明.md)，身份在 [企微到OA身份.md](企微到OA身份.md)。
+OA 桥接插件 `oa-workflow-bridge`（工具 `oa_workflow`）的唯一正文：存储、状态机、工具契约、错误码、预检、排错。部署步骤在[部署与运维手册](../OpenClaw%20Gateway%20部署与运维手册.md)，OA 接口在 [Ecology 流程创建 API 说明.md](Ecology%20流程创建%20API%20说明.md)，身份在 [企微到OA身份.md](企微到OA身份.md)。
 
 | 项 | 现状 |
 | --- | --- |
@@ -64,7 +64,7 @@ OA 桥接插件 `oa-workflow-bridge`（工具 `oa_workflow`）的唯一正文：
 - 时间都是毫秒 BIGINT，不依赖 MySQL 时区。JSON 存 TEXT，由插件序列化。
 - `ticket_type` / `system_name` / `location` 在 prepare 时从校验后的 draft 写入（未命中兜底即「运维支持」/「其他」；地点按 A–F 或系统名括号得出，得不出为 NULL），终态后保留，供统计与审计。
 - 时间：`created_at` 生成确认单；`submitted_at` OA 返回数字单号的时刻，只在记 `submitted` 时写一次（人工对账收成已提交时由 DBA 填 OA 里的建单时间）；`updated_at` 最后一次改动，会被后续改动覆盖，不要拿它当提交时间。
-- 建表语句在 `src/db.mjs`，独立副本在 `sql/schema.sql`（测试校验两者一致）。插件启动时 `CREATE TABLE IF NOT EXISTS`，库本身由 DBA 先建（见安装手册第 3 节）。
+- 建表语句在 `src/db.mjs`，独立副本在 `sql/schema.sql`（测试校验两者一致）。插件启动时 `CREATE TABLE IF NOT EXISTS`，库本身由 DBA 先建（见部署与运维手册第 3 节）。
 - 不做迁移：`CREATE TABLE IF NOT EXISTS` 不会给已有的表补列，表结构变了就起新库。
 
 ### 2.2 工单状态
@@ -126,7 +126,7 @@ Docker 必须设 `OPENCLAW_STATE_DIR=/home/node/.openclaw`，否则 staging 不�
 | 提交中 / 待对账的单 | 挡住新单（回「OA 需要人工核对」），不会被替换 |
 | 群聊里多人 | 每人各自的单和附件，互不串 |
 
-插件不删会话记录与通道 inbound 原件；inbound 原件由宿主机 cron 满 24 小时清理（运维手册第 7 节）。
+插件不删会话记录与通道 inbound 原件；inbound 原件由宿主机 cron 满 24 小时清理（部署与运维手册第 9 节）。
 
 ## 3. 系统清单 `systems.json`
 
@@ -179,7 +179,7 @@ AGENTS.md 规则零条命中、但确实是 IT 方面的事时，模型不传 `t
 | `OA_MAX_ATTACHMENT_BYTES` / `OA_MAX_TOTAL_ATTACHMENT_BYTES` | 10MB / 25MB |
 | `OA_IDENTITY_ADAPTER` | `on`；`off` 时 `prepare` 回 `OA_IDENTITY_MAPPING_REQUIRED` |
 
-插件不再读任何配置文件。旧部署（`bridge-config.json` + secret 文件）换成新方式，见运维手册第 12 节：全新起一套再切换，只沿用凭据。
+插件不再读任何配置文件。旧部署（`bridge-config.json` + secret 文件）换成新方式，见部署与运维手册第 18 节：全新起一套再切换，只沿用凭据。
 
 另外 `OPENCLAW_STATE_DIR` 决定 staging 目录（compose 已设）。`openclaw.json` 侧：`plugins.allow` 与 `entries` 只用 id `oa-workflow-bridge`（旧 id `oa-workflow-bridge-redis`、`wecom-oa-identity-adapter` 删干净），`load.paths` 为 `/opt/xa/oa-workflow-bridge`，两处 `alsoAllow` 含 `oa_workflow`。
 
@@ -354,17 +354,17 @@ docker exec xa-gateway node /opt/xa/oa-workflow-bridge/scripts/reconcile.mjs --o
 
 输出小A成功提交数、在 OA 里找到的数、`missingInOa`（小A记成功但 OA 清单没有）与 `notMarkedSubmitted`（有 OA 单号但小A记成待对账等），两者都带工单类型与所属系统。不带 `--oa` 则导出小A有 OA 单号的单（CSV：单号、内部工单号、类型、系统、地点、状态、提交时间、最后更新时间）。
 
-`unknown` 的对账步骤见运维手册第 10 节。
+`unknown` 的对账步骤见部署与运维手册第 16 节。
 
 ## 8. 排错
 
 | 现象 | 处理 |
 | --- | --- |
-| `Cannot find module 'jpeg-js'` / `Cannot find package 'mysql2'` | 用的不是安装手册第 5 节构建的镜像（compose `image:` 应为 `xa-gateway-oa:…`），或 `load.paths` 仍指向 `~/xa/extensions` 下的旧目录 |
+| `Cannot find module 'jpeg-js'` / `Cannot find package 'mysql2'` | 用的不是部署与运维手册第 5 节构建的镜像（compose `image:` 应为 `xa-gateway-oa:…`），或 `load.paths` 仍指向 `~/xa/extensions` 下的旧目录 |
 | `MySQL init failed: OA_APP_ID is missing or invalid` / `OA_PUBLIC_KEY …` | `.env` 没填或 compose 不是仓库版本；补完 `up -d` |
 | `MySQL init failed: OA_MYSQL_PASSWORD is not configured` / `OA_MYSQL_HOST is required` | compose 不是仓库版本（仓库版会在 `.env` 缺项时直接拒绝启动）；换成仓库 compose 后 `up -d` |
 | `ECONNREFUSED` / `ETIMEDOUT` / `EHOSTUNREACH` | 主机或端口错；MySQL 未监听外网地址（`bind-address`）；防火墙未放通 Gateway → 3306 |
-| `ER_ACCESS_DENIED_ERROR` | 密码错；账号 host 部分不含 Gateway 来源 IP；本机装的 MySQL 还留着匿名账号（见安装手册第 3 节） |
+| `ER_ACCESS_DENIED_ERROR` | 密码错；账号 host 部分不含 Gateway 来源 IP；本机装的 MySQL 还留着匿名账号（见部署与运维手册第 3 节） |
 | `ER_BAD_DB_ERROR` | 库没建，或 `.env` 的 `OA_MYSQL_DATABASE` 写错 |
 | `ER_TABLEACCESS_DENIED_ERROR` / 建表失败 | 账号缺 `CREATE` / `INDEX` 权限 |
 | 回执 `DB_UNAVAILABLE` | 上面几项之一；插件会在下次调用自动重连，不必为第一次失败重启 Gateway（初始化失败除外） |
@@ -372,7 +372,7 @@ docker exec xa-gateway node /opt/xa/oa-workflow-bridge/scripts/reconcile.mjs --o
 | 员工「还不能提交到 OA」 | 看会话回执里的具体码，按 [企微到OA身份.md](企微到OA身份.md) 第 7 节；`docker logs` 里 grep 不到工具回执是正常的 |
 | 企微已落盘，员工仍看到「没有检测到新文件」 | 两个插件都要开 `hooks.allowConversationAccess`；hook 收件日志是 `captured inbound via …`；群聊 hook 没带发送人时只能靠工具 ctx 收 |
 | `STAGING_MISSING` | 没设 `OPENCLAW_STATE_DIR` 或 staging 被删；员工取消后重报 |
-| `RECONCILIATION_REQUIRED` | 禁止自动重试；按运维手册第 10 节人工对账 |
+| `RECONCILIATION_REQUIRED` | 禁止自动重试；按部署与运维手册第 16 节人工对账 |
 | `PARAM_ERROR` / `HTTP_4xx` | OA 明确拒绝，单已结束；核对字段 / 附件格式，让员工重报 |
 | 单据出现在接口账号名下 | Header `userid` 必须是申请人；确认部署的是本仓库插件 |
 | `OA_BRIDGE_INACTIVE` | `.env` 里 `OA_ACTIVE=false` |

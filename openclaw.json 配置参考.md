@@ -5,7 +5,7 @@
 基础：
 
 - 格式是 JSON5，按 schema 严格校验。改完先 `config validate`。
-- `${VAR}` 引用环境变量（仅大写名），真值写在 `~/xa/.env`，见安装手册第 4 节。
+- `${VAR}` 引用环境变量（仅大写名），真值写在 `~/xa/.env`，见部署与运维手册第 4 节。
 - 多数字段热重载；`plugins.load.paths`、`gateway.port` / `bind` 要重启；`.env` 变了要 `docker compose up -d`。
 - 运行时会自动写 `meta`、`wizard`，不用手改。旧模板里的 `meta.handoffTemplate` 等不是合法字段，会 `meta: Invalid input`。
 

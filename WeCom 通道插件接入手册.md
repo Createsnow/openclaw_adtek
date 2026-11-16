@@ -1,6 +1,6 @@
 # WeCom 通道插件接入手册
 
-企业微信不是 OpenClaw 内置通道，靠外部插件 `@wecom/wecom-openclaw-plugin`（id `wecom-openclaw-plugin`）收发。本仓库不含插件源码，从 npm 安装。安装命令见安装手册第 8 节，本文讲配置含义、「思考中」、版本和排障。
+企业微信不是 OpenClaw 内置通道，靠外部插件 `@wecom/wecom-openclaw-plugin`（id `wecom-openclaw-plugin`）收发。本仓库不含插件源码，从 npm 安装。安装命令见部署与运维手册第 8 节，本文讲配置含义、「思考中」、版本和排障。
 
 ## 1. 要点
 
@@ -88,7 +88,7 @@ oc plugins list      # version 必须变成目标号
 | `channels list` 为空 | 缺 `channels.wecom`，或插件没 enabled |
 | 私聊没回复，日志 `DM dropped` | `allowFrom` 缺 `"*"` |
 | 「思考中」一直转 / 连发后卡住 | 插件 < 2026.7.2：先关占位，再按第 5 节升级 |
-| `[wecom] channel autostart suppressed` | 崩溃熔断，见运维手册第 8 节；不要 `channels start --channel` |
+| `[wecom] channel autostart suppressed` | 崩溃熔断，见部署与运维手册第 14 节；不要 `channels start --channel` |
 | 能连上但回复不对 / 不回复 | 查模型，见 DashScope 手册 |
 | 日志出现 `smartsheet_get_records`、`errcode=851014` | 模型调了企微文档 MCP：两处 `alsoAllow` 只留 `oa_workflow`，两处 `skills: []`，`restart` 后 `/new`，`/context detail` 中 `Skills list` 为 0。不要为此去授权企微文档 |
 | 已有目标版本还 `--force` 重装，报 `Plugin artifact has no valid plugin manifest` | 不用重装；`plugins list` 已是目标版本就跳过 |

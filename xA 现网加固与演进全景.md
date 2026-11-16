@@ -55,7 +55,7 @@ SmartX 集群（平台运维：虚机规格、存储、网络、快照）
 - MySQL 要先可连（插件加载即建表）。
 - 三套凭据不能混：企微机器人 BotId/BotSecret（收发）、企微自建应用 corpid/secret（身份转换）、OA appid/AppSecret（建单）。
 
-步骤见 [安装手册](OpenClaw%20Gateway%20Linux%20服务器安装手册.md)，日常见 [运维手册](OpenClaw%20Gateway%20Docker%20运维手册.md)。
+安装与日常运维见 [部署与运维手册](OpenClaw%20Gateway%20部署与运维手册.md)。
 
 ## 4. 一条消息的全链路
 
@@ -180,7 +180,7 @@ sequenceDiagram
 | `AGENTS.md` 体积紧 | 已超默认 20000，再加内容可能被截断 |
 | 身份 miss 依赖外部 | 企微通讯录 + 人事接口；回执码在会话 jsonl，不在 `docker logs` |
 | 全局一张待确认偏硬 | 员工换对话后体验像卡住 |
-| `unknown` 靠人工对账 | 见运维手册第 10 节 |
+| `unknown` 靠人工对账 | 见部署与运维手册第 16 节 |
 | 现网不自动流转 | `.env` 的 `OA_ISNEXTFLOW=0`；正式启用改 `1` 后 `docker compose up -d` |
 | 配置分层坑 | `bootstrapMaxChars`、`skills` 只写 defaults 不生效 |
 | compose 无内存闸 | 规格由 SmartX 虚机决定，容器限额不能代替扩虚机 |

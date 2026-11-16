@@ -1,6 +1,6 @@
 # DashScope 兼容 Provider 配置手册
 
-阿里云百炼（DashScope）在 OpenClaw 里按 **OpenAI 兼容自定义 Provider** 接入。完整配置以仓库 `workspace-rules/openclaw.json` 的 `models` 段为准；凭据写在 `.env`，见安装手册第 4 节。
+阿里云百炼（DashScope）在 OpenClaw 里按 **OpenAI 兼容自定义 Provider** 接入。完整配置以仓库 `workspace-rules/openclaw.json` 的 `models` 段为准；凭据写在 `.env`，见部署与运维手册第 4 节。
 
 官方参考：[OpenClaw Custom providers](https://docs.openclaw.ai/gateway/config-tools#custom-providers-and-base-urls)、[OpenClaw Qwen thinking controls](https://docs.openclaw.ai/providers/qwen)、[百炼 OpenAI 兼容接口](https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope)。
 
@@ -66,7 +66,7 @@ API Key、Base URL、模型必须同一地域：
 | exit 78，`models.providers.bailian.models.0.name: Invalid input` | 缺 `name` 或 JSON 语法错 | 补字段，`docker compose restart` |
 | `Unknown model: bailian/…`、`model_not_found` | 模型 ID 填错，或 json 的 Provider 键不是 `bailian` | 改 `.env` 的 `XA_DOMESTIC_MODEL_ID` 后 `docker compose up -d`；Provider 键保持 `bailian` |
 | 日志模型正确但调用失败 | Key 没开通该模型，或地域不一致 | 百炼控制台确认；先换 `qwen-plus` 测连通 |
-| `restart-loop breaker tripped` | 之前多次启动失败 | 运维手册第 8 节 |
+| `restart-loop breaker tripped` | 之前多次启动失败 | 部署与运维手册第 14 节 |
 | 有 `agent/models.json`（可能含明文 Key） | Control UI / CLI 写过 Provider | 删除 `~/xa/config/agents/itservicedeskagent/agent/models.json`，`restart` |
 | `LiteLLM pricing fetch failed` | 拉定价超时 | 可忽略 |
 

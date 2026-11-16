@@ -1,6 +1,6 @@
 # 企微到 OA：身份
 
-讲清楚：谁在调 OA 接口、谁是申请人、企微通道给了什么、加密 userid 怎么变成 OA 人员 id、出错怎么查。部署见[安装手册](../OpenClaw%20Gateway%20Linux%20服务器安装手册.md)，OA 接口与建单字段见 [Ecology 流程创建 API 说明.md](Ecology%20流程创建%20API%20说明.md)，工具契约见 [OA Workflow Bridge 接入手册.md](OA%20Workflow%20Bridge%20接入手册.md)。
+讲清楚：谁在调 OA 接口、谁是申请人、企微通道给了什么、加密 userid 怎么变成 OA 人员 id、出错怎么查。部署见[部署与运维手册](../OpenClaw%20Gateway%20部署与运维手册.md)，OA 接口与建单字段见 [Ecology 流程创建 API 说明.md](Ecology%20流程创建%20API%20说明.md)，工具契约见 [OA Workflow Bridge 接入手册.md](OA%20Workflow%20Bridge%20接入手册.md)。
 
 ## 1. 结论
 

@@ -1,5 +1,5 @@
 # xA Gateway 镜像：官方 OpenClaw + OA 桥接插件（含依赖）。
-# 在仓库 linux/ 目录下构建：
+# 在仓库根目录下构建：
 #   docker build -f docker/Dockerfile -t xa-gateway-oa:2026.9.2 .
 # 插件配置全部来自环境变量（部署目录的 .env），镜像里不放任何配置文件。
 # 本机已有别的官方镜像名（如 openclaw/openclaw:latest）时：--build-arg OPENCLAW_IMAGE=<那个名字>
