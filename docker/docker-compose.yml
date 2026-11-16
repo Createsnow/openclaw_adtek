@@ -36,7 +36,6 @@ services:
       OA_ACTIVE: ${OA_ACTIVE:-false}
       OA_ISNEXTFLOW: ${OA_ISNEXTFLOW:-0}
       OA_IDENTITY_ADAPTER: ${OA_IDENTITY_ADAPTER:-on}
-      OA_WITHDRAW_AS_MONITOR: ${OA_WITHDRAW_AS_MONITOR:-false}
       # 下面这些全公司固定，留空用插件默认值（https://adtekoa.com、602、scfj、24 小时、30 分钟、10MB、25MB）
       OA_BASE_URL: ${OA_BASE_URL:-}
       OA_WORKFLOW_ID: ${OA_WORKFLOW_ID:-}

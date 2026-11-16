@@ -26,7 +26,7 @@ try {
     [since],
   );
   // 建单按 created_at 落日，提交按 submitted_at（OA 返回单号的时刻）落日。
-  // 「提交」含之后被员工撤销（withdrawn，OA 已删除）的单：它们确实进过 OA；按状态的分布里 withdrawn 单独列出。
+  // 「提交」含之后被员工撤回（withdrawn）的单：它们确实进过 OA；按状态的分布里 withdrawn 单独列出。
   const dayOf = (column) => `DATE_FORMAT(FROM_UNIXTIME(${column} / 1000), '%Y-%m-%d')`;
   const preparedPerDay = await db.query(
     `SELECT ${dayOf("created_at")} AS day, COUNT(*) AS n FROM oa_ticket WHERE created_at >= ? GROUP BY day`,

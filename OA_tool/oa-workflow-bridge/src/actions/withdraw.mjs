@@ -14,10 +14,13 @@ import {
 import { getTicketByRequestId, listWithdrawableTickets, updateTicket, withSenderLock } from "../store.mjs";
 import { fail, maybeCleanup } from "./common.mjs";
 
-/** 同进程里正在撤销的单：并发的第二次撤销直接回「正在撤销」，不再打 OA。 */
+/** 同进程里正在撤回的单：并发的第二次撤回直接回「正在撤回」，不再打 OA。 */
 const inflightWithdrawals = new Set();
 
-/** OA 明确说没权限：多半是处理人已经办理，或流程节点不允许删除。 */
+/** 写进 OA 的撤回意见（员工看不到，处理人 / 流程日志里可见）。 */
+const WITHDRAW_REMARK = "申请人通过企业微信小A撤回";
+
+/** OA 明确说没权限：多半是处理人已经办理，或流程节点不允许撤回。 */
 const DENIED_CODES = new Set(["NO_PERMISSION"]);
 
 function normalizeRequestId(value) {
@@ -28,7 +31,7 @@ function normalizeRequestId(value) {
 }
 
 /**
- * 找要撤销的那张单。只在此人自己经小A提交过的单里找，别人的单号一律当查不到。
+ * 找要撤回的那张单。只在此人自己经小A提交过的单里找，别人的单号一律当查不到。
  * 返回 `{ ticket }` 或 `{ reply }`（不调 OA，直接回员工）。
  */
 async function pickTicket(store, identity, requestId) {
@@ -72,11 +75,11 @@ function failurePayload(error, requestId) {
 }
 
 /**
- * 撤销此人已提交到 OA 的工单：调 OA deleteRequest 删除该流程，不可恢复。
+ * 撤回此人已提交到 OA 的工单：调 OA withdrawRequest，流程退回申请人（不删除）。
  * - 带 requestId：只认此人自己经小A提交的单。
  * - 不带：只有一张已提交的单就撤那张；多张则列出最近几张请员工回单号。
- * 默认以申请人身份按流程权限删除；`OA_WITHDRAW_AS_MONITOR=true` 时以接口账号的监控权限删除。
- * 删除失败不改本地状态（仍是 submitted），员工可以再试；只有 OA 回 SUCCESS 才记 withdrawn（= 已从 OA 删除）。
+ * 以申请人身份撤回（Header userid = 申请人），提醒处理人（isremind=1），撤回意见固定 WITHDRAW_REMARK。
+ * 撤回失败不改本地状态（仍是 submitted），员工可以再试；只有 OA 回 SUCCESS 才记 withdrawn。
  */
 export async function withdraw({ store, stateDir, config, trust, params, logger, deps }) {
   const requestedId = normalizeRequestId(params.requestId);
@@ -97,11 +100,12 @@ export async function withdraw({ store, stateDir, config, trust, params, logger,
     const client = deps.clientFactory(config);
     try {
       const started = Date.now();
-      await client.deleteRequest(requestId, {
+      await client.withdrawRequest(requestId, {
         operatorUserId: ticket.oaRequesterId,
-        asMonitor: config.withdrawAsMonitor === true,
+        remark: WITHDRAW_REMARK,
+        remind: true,
       });
-      logger?.info?.(`[oa-workflow-bridge] withdraw deleteRequest elapsedMs=${Date.now() - started} requestId=${requestId}`);
+      logger?.info?.(`[oa-workflow-bridge] withdraw withdrawRequest elapsedMs=${Date.now() - started} requestId=${requestId}`);
     } catch (error) {
       logger?.warn?.(`[oa-workflow-bridge] withdraw failed requestId=${requestId} code=${error?.code || "UNKNOWN"}`);
       return failurePayload(error, requestId);
@@ -112,8 +116,8 @@ export async function withdraw({ store, stateDir, config, trust, params, logger,
         expectStatus: "submitted",
       }));
     } catch (error) {
-      // OA 已删除，本地没记上：仍按成功回员工，台账留 submitted，对账时以 OA 为准。
-      logger?.warn?.(`[oa-workflow-bridge] OA deleted requestId=${requestId} but local persist failed: ${error?.message || error}`);
+      // OA 已撤回，本地没记上：仍按成功回员工，台账留 submitted，对账时以 OA 为准。
+      logger?.warn?.(`[oa-workflow-bridge] OA withdrew requestId=${requestId} but local persist failed: ${error?.message || error}`);
     }
   } finally {
     inflightWithdrawals.delete(ticket.confirmationId);

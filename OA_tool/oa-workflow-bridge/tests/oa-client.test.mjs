@@ -316,47 +316,46 @@ function drawBackFetch(calls, body = { code: "SUCCESS", errMsg: {} }) {
   };
 }
 
-test("撤销默认以申请人身份调 deleteRequest，requestId 为字符串、不带 ismonitor", async () => {
+test("撤回以申请人身份调 withdrawRequest：参数都是字符串，带 isremind 与 remark", async () => {
   const { privateKey, spki } = keys();
   const calls = [];
   const client = new OAClient({ config: config(spki), credentials: resolver, fetchImpl: drawBackFetch(calls) });
-  const result = await client.deleteRequest("778899", { operatorUserId: "13437" });
+  const result = await client.withdrawRequest("778899", { operatorUserId: "13437", remark: "申请人撤回" });
   assert.equal(result.requestId, "778899");
-  assert.equal(calls[1].url, "https://adtekoa.com/api/workflow/paService/deleteRequest");
+  assert.equal(calls[1].url, "https://adtekoa.com/api/workflow/paService/withdrawRequest");
   assert.equal(calls[1].options.method, "POST");
-  assert.deepEqual(JSON.parse(calls[1].options.body), { requestId: "778899" });
+  assert.deepEqual(JSON.parse(calls[1].options.body), { requestId: "778899", isremind: "1", remark: "申请人撤回" });
   assert.equal(decryptHeader(calls[1].options.headers.userid, privateKey), "13437");
 });
 
-test("撤销 asMonitor：接口账号 + otherParams 字符串 {\"ismonitor\":\"1\"}", async () => {
-  const { privateKey, spki } = keys();
+test("撤回 remind=false 传 isremind=0，空 remark 不传", async () => {
+  const { spki } = keys();
   const calls = [];
   const client = new OAClient({ config: config(spki), credentials: resolver, fetchImpl: drawBackFetch(calls) });
-  await client.deleteRequest("778899", { asMonitor: true });
-  assert.deepEqual(JSON.parse(calls[1].options.body), { requestId: "778899", otherParams: "{\"ismonitor\":\"1\"}" });
-  assert.equal(decryptHeader(calls[1].options.headers.userid, privateKey), "10001");
+  await client.withdrawRequest("778899", { operatorUserId: "13437", remind: false });
+  assert.deepEqual(JSON.parse(calls[1].options.body), { requestId: "778899", isremind: "0" });
 });
 
-test("撤销：非数字单号或缺申请人时不调 OA", async () => {
+test("撤回：非数字单号或缺申请人时不调 OA", async () => {
   const { spki } = keys();
   const client = new OAClient({
     config: config(spki),
     credentials: resolver,
     fetchImpl: async () => { throw new Error("must not call OA"); },
   });
-  await assert.rejects(client.deleteRequest("12a", { operatorUserId: "13437" }), (error) => error.code === "INVALID_REQUEST_ID");
-  await assert.rejects(client.deleteRequest("778899", {}), (error) => error.code === "INVALID_CONFIGURATION");
+  await assert.rejects(client.withdrawRequest("12a", { operatorUserId: "13437" }), (error) => error.code === "INVALID_REQUEST_ID");
+  await assert.rejects(client.withdrawRequest("778899", {}), (error) => error.code === "INVALID_CONFIGURATION");
 });
 
-test("撤销：NO_PERMISSION 是明确拒绝，SYSTEM_INNER_ERROR 记结果不确定", async () => {
+test("撤回：NO_PERMISSION 是明确拒绝，SYSTEM_INNER_ERROR 记结果不确定", async () => {
   const { spki } = keys();
   const originalLog = console.log;
   console.log = () => {};
   try {
     const denied = new OAClient({ config: config(spki), credentials: resolver, fetchImpl: drawBackFetch([], { code: "NO_PERMISSION", errMsg: {} }) });
-    await assert.rejects(denied.deleteRequest("778899", { operatorUserId: "13437" }), (error) => error.code === "NO_PERMISSION" && !error.ambiguous);
+    await assert.rejects(denied.withdrawRequest("778899", { operatorUserId: "13437" }), (error) => error.code === "NO_PERMISSION" && !error.ambiguous);
     const inner = new OAClient({ config: config(spki), credentials: resolver, fetchImpl: drawBackFetch([], { code: "SYSTEM_INNER_ERROR", errMsg: {} }) });
-    await assert.rejects(inner.deleteRequest("778899", { operatorUserId: "13437" }), (error) => error.code === "SYSTEM_INNER_ERROR" && error.ambiguous);
+    await assert.rejects(inner.withdrawRequest("778899", { operatorUserId: "13437" }), (error) => error.code === "SYSTEM_INNER_ERROR" && error.ambiguous);
   } finally {
     console.log = originalLog;
   }

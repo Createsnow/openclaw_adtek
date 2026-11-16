@@ -57,7 +57,7 @@ const PARAMETERS = {
     action: {
       type: "string",
       enum: ["prepare", "attach", "submit_confirmed", "status", "cancel", "withdraw"],
-      description: "prepare 建待确认（已有待确认单会被替换）；attach 只收图片/文件；submit_confirmed 确认后建 OA；status 按人查当前待确认和最近已提交；cancel 作废待确认；withdraw 撤销已提交到 OA 的单（OA 里删除该流程，不可恢复）。",
+      description: "prepare 建待确认（已有待确认单会被替换）；attach 只收图片/文件；submit_confirmed 确认后建 OA；status 按人查当前待确认和最近已提交；cancel 作废待确认；withdraw 撤回已提交到 OA 的单（流程退回申请人，不删除）。",
     },
     confirmationId: {
       type: "string",
@@ -65,7 +65,7 @@ const PARAMETERS = {
     },
     requestId: {
       type: "string",
-      description: "仅 withdraw：员工自己报了要撤销的 OA 工单号才传，只抄数字；没报就不传（插件会找此人唯一一张已提交的单，或列出来让员工选）。其它 action 不要传。",
+      description: "仅 withdraw：员工自己报了要撤回的 OA 工单号才传，只抄数字；没报就不传（插件会找此人唯一一张已提交的单，或列出来让员工选）。其它 action 不要传。",
     },
     supplement: {
       type: "string",

@@ -19,7 +19,7 @@ const ACTIVE = new Set(ACTIVE_TICKET_STATUSES);
 const TERMINAL = new Set(["submitted", "cancelled", "expired", "failed", "withdrawn"]);
 /** 查进度「最近记录」列出的状态与条数。 */
 const RECENT_STATUSES = ["submitted", "cancelled", "expired", "failed", "unknown", "withdrawn"];
-/** withdraw 不指定单号时最多列出几张可撤销的单。 */
+/** withdraw 不指定单号时最多列出几张可撤回的单。 */
 const WITHDRAWABLE_LIMIT = 5;
 const RECENT_LIMIT = 20;
 
@@ -120,7 +120,7 @@ export async function getTicketByRequestId(store, identity, requestId) {
   return rowToTicket(rows[0]);
 }
 
-/** 此人已提交到 OA、还能尝试撤销的单（最近的在前，最多 WITHDRAWABLE_LIMIT 张）与总数。 */
+/** 此人已提交到 OA、还能尝试撤回的单（最近的在前，最多 WITHDRAWABLE_LIMIT 张）与总数。 */
 export async function listWithdrawableTickets(store, identity) {
   if (!identity) return { total: 0, tickets: [] };
   const where = "WHERE sender_code = ? AND status = 'submitted' AND request_id IS NOT NULL AND request_id <> ''";
