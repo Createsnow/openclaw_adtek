@@ -70,7 +70,7 @@ export function reconcileCard({ requestId, handlerNames } = {}) {
   ].filter(Boolean).join("\n");
 }
 
-// ---------- 撤回已提交的 OA 工单（withdraw） ----------
+// ---------- 撤销已提交的 OA 工单（withdraw → OA deleteRequest 删除流程） ----------
 
 function requestLine(requestId) {
   return /^\d+$/.test(String(requestId || "")) ? `🎫 工单号：${requestId}` : "";
@@ -78,39 +78,39 @@ function requestLine(requestId) {
 
 export function withdrawnCard({ requestId } = {}) {
   return [
-    "↩️ **已撤回**",
+    "🗑️ **已撤销**",
     requestLine(requestId),
     "",
-    "这张单已从处理人那里收回，退回到你的 OA 待办。",
-    "要修改后重新提交或作废，请到 OA 里操作。",
+    "这张单已从 OA 删除，处理人那边不会再看到。",
+    "还有问题直接发给我，重新建单。",
   ].filter((line, index) => line || index === 2).join("\n");
 }
 
 export function alreadyWithdrawnCard({ requestId } = {}) {
-  return ["↩️ **这张单之前已经撤回过**", requestLine(requestId)].filter(Boolean).join("\n");
+  return ["🗑️ **这张单之前已经撤销过**", requestLine(requestId)].filter(Boolean).join("\n");
 }
 
 export function withdrawDeniedCard({ requestId } = {}) {
   return [
-    "❌ **这张单撤回不了**",
+    "❌ **这张单撤销不了**",
     requestLine(requestId),
-    "> 原因：处理人可能已经在办理，或流程不允许撤回。请直接联系处理人。",
+    "> 原因：处理人可能已经在办理，或流程不允许删除。请直接联系处理人。",
   ].filter(Boolean).join("\n");
 }
 
 export function withdrawFailedCard({ requestId } = {}) {
   return [
-    "❌ **撤回失败**",
+    "❌ **撤销失败**",
     requestLine(requestId),
-    "> 原因：OA 拒绝了撤回，请联系管理员。",
+    "> 原因：OA 拒绝了删除，请联系管理员。",
   ].filter(Boolean).join("\n");
 }
 
 export function withdrawUnknownCard({ requestId } = {}) {
   return [
-    "⚠️ **撤回结果不确定**",
+    "⚠️ **撤销结果不确定**",
     requestLine(requestId),
-    "> 请稍后再说一次「撤回」，或到 OA 里查看这张单。",
+    "> 请先到 OA 里看这张单还在不在；还在的话再说一次「撤销」。",
   ].filter(Boolean).join("\n");
 }
 
@@ -119,21 +119,21 @@ export function withdrawChooseCard({ total = 0, requestIds = [] } = {}) {
     ? `你已提交 ${total} 张工单，最近 ${requestIds.length} 张：`
     : `你已提交 ${total} 张工单：`;
   return [
-    "↩️ 要撤回哪一张？",
+    "🗑️ 要撤销哪一张？",
     heading,
     ...requestIds.map((id) => `🎫 工单号：${id}`),
     "",
-    "请回复要撤回的工单号。",
+    "请回复要撤销的工单号。",
   ].join("\n");
 }
 
-export const WITHDRAW_NOTHING = "🔍 没有找到可以撤回的已提交工单。\n还没提交的确认单请回「取消」。";
+export const WITHDRAW_NOTHING = "🔍 没有找到可以撤销的已提交工单。\n还没提交的确认单请回「取消」。";
 
-export const WITHDRAW_NOT_FOUND = "🔍 没有找到这张工单。\n只能撤回你自己通过我提交的工单，请核对工单号。";
+export const WITHDRAW_NOT_FOUND = "🔍 没有找到这张工单。\n只能撤销你自己通过我提交的工单，请核对工单号。";
 
-export const WITHDRAW_INACTIVE = "ℹ️ 暂时不能撤回 OA 工单，请联系管理员。";
+export const WITHDRAW_INACTIVE = "ℹ️ 暂时不能撤销 OA 工单，请联系管理员。";
 
-export const WITHDRAWING = "⏳ 这张单正在撤回，请稍候再查看。";
+export const WITHDRAWING = "⏳ 这张单正在撤销，请稍候再查看。";
 
 export const CANCELLED = "🗑️ 好的，这张单已取消。\n有新问题直接发给我。";
 

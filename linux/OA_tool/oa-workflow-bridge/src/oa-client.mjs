@@ -242,11 +242,12 @@ export class OAClient {
   }
 
   /**
-   * 强制收回已提交的流程（doForceDrawBack）。
-   * 默认以申请人身份收回（Header userid = 申请人）；asMonitor=true 时以接口账号 + 监控权限收回（otherParams.ismonitor=1）。
-   * 收回失败可安全重试，所以只有网络中断 / 5xx / SYSTEM_INNER_ERROR 标 ambiguous，调用方据此提示「结果不确定」。
+   * 删除已提交的流程（deleteRequest），员工「撤销工单」用。删除后 OA 里不再有这张单，不可恢复。
+   * 默认以申请人身份删除（Header userid = 申请人，按流程权限判断）；
+   * asMonitor=true 时以接口账号 + 监控权限删除（otherParams = '{"ismonitor":"1"}'，接口文档要求 String）。
+   * 只有网络中断 / 5xx / SYSTEM_INNER_ERROR 标 ambiguous，调用方据此提示「结果不确定」。
    */
-  async forceDrawBack(requestId, { operatorUserId, asMonitor = false } = {}) {
+  async deleteRequest(requestId, { operatorUserId, asMonitor = false } = {}) {
     const id = String(requestId ?? "").trim();
     if (!/^\d{1,18}$/.test(id)) {
       throw new OAClientError("OA request ID is invalid", { code: "INVALID_REQUEST_ID" });
@@ -255,21 +256,22 @@ export class OAClient {
     if (!asMonitor && !/^\d{1,18}$/.test(headerUserId)) {
       throw new OAClientError("OA operator user ID is invalid", { code: "INVALID_CONFIGURATION" });
     }
-    const body = { requestId: Number.isSafeInteger(Number(id)) ? Number(id) : id };
-    if (asMonitor) body.otherParams = { ismonitor: "1" };
-    const result = await this.authenticatedRequest("/api/workflow/paService/doForceDrawBack", {
+    // 接口文档：requestId、otherParams 都是 String。
+    const body = { requestId: id };
+    if (asMonitor) body.otherParams = JSON.stringify({ ismonitor: "1" });
+    const result = await this.authenticatedRequest("/api/workflow/paService/deleteRequest", {
       body,
       ambiguousOnServerError: true,
       headerUserId,
     });
     if (result?.code !== "SUCCESS") {
-      const code = typeof result?.code === "string" && result.code ? result.code : "OA_DRAWBACK_REJECTED";
-      console.log(`[OA_DRAWBACK_REJECTED] ${JSON.stringify(redactPayload({
+      const code = typeof result?.code === "string" && result.code ? result.code : "OA_DELETE_REJECTED";
+      console.log(`[OA_DELETE_REJECTED] ${JSON.stringify(redactPayload({
         code,
         requestId: id,
         errMsg: result?.errMsg ?? result?.msg ?? result?.message ?? null,
       }))}`);
-      throw new OAClientError("OA rejected the force draw-back", {
+      throw new OAClientError("OA rejected the request deletion", {
         code,
         ambiguous: code === "SYSTEM_INNER_ERROR",
       });

@@ -58,7 +58,7 @@ const missingInOa = submitted.filter((id) => !oaIds.has(id)).map((id) => {
   const row = ours.get(id);
   return { requestId: id, ticketType: row.ticket_type || null, systemName: row.system_name || null };
 });
-// withdrawn：员工经小A强制收回，OA 里仍有这张单（退回申请人），不算异常。
+// withdrawn：员工经小A撤销，OA 已删除这张单（OA 导出里找不到是正常的），不算异常。
 const withdrawn = [...ours.values()].filter((row) => row.status === "withdrawn").map((row) => String(row.request_id));
 const unknownWithId = [...ours.values()].filter((row) => row.status !== "submitted" && row.status !== "withdrawn").map((row) => ({
   requestId: String(row.request_id),

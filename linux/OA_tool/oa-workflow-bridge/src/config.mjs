@@ -89,7 +89,7 @@ export function loadMysqlConfig(env = process.env) {
  * - 每套环境都要填：OA_APP_ID、OA_PUBLIC_KEY；按需改：OA_ACTIVE（默认 false）、OA_ISNEXTFLOW（默认 "0"）
  * - 全公司固定、一般不改：OA_BASE_URL、OA_WORKFLOW_ID、OA_ATTACHMENT_FIELD、OA_PENDING_TTL_HOURS、
  *   OA_INBOX_TTL_MINUTES、OA_MAX_ATTACHMENT_BYTES、OA_MAX_TOTAL_ATTACHMENT_BYTES、OA_IDENTITY_ADAPTER
- * - 可选：OA_WITHDRAW_AS_MONITOR（默认 false，撤回已提交工单时是否用接口账号的监控权限）
+ * - 可选：OA_WITHDRAW_AS_MONITOR（默认 false，撤销已提交工单时是否用接口账号的监控权限删除）
  */
 export async function loadBridgeConfig({ env = process.env } = {}) {
   const get = (name, fallback) => setting(env, name, fallback);
@@ -119,7 +119,7 @@ export async function loadBridgeConfig({ env = process.env } = {}) {
     ),
     mysql: loadMysqlConfig(env),
     identity: { adapter },
-    // 撤回已提交工单：默认以申请人身份收回；true 时以接口账号 + 监控权限收回（接口账号须有该流程的监控权限）。
+    // 撤销已提交工单（deleteRequest 删除流程）：默认以申请人身份按流程权限删除；true 时以接口账号 + 监控权限删除（接口账号须有该流程的监控权限）。
     withdrawAsMonitor: parseBoolean(get("OA_WITHDRAW_AS_MONITOR", false), "OA_WITHDRAW_AS_MONITOR"),
   };
   if (!/^[A-Za-z0-9._-]{2,64}$/.test(config.appId)) {

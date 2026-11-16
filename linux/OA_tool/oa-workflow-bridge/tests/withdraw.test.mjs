@@ -35,7 +35,7 @@ async function seedSubmitted(store, { sender = "wecom-user-1", requestId, oaRequ
   return confirmationId;
 }
 
-async function setup(t, { active = true, withdrawAsMonitor = false, forceDrawBack } = {}) {
+async function setup(t, { active = true, withdrawAsMonitor = false, deleteRequest } = {}) {
   const stateDir = await mkdtemp(path.join(os.tmpdir(), "xa-oa-withdraw-"));
   t.after(() => rm(stateDir, { recursive: true, force: true }));
   const store = createTestStore();
@@ -46,9 +46,9 @@ async function setup(t, { active = true, withdrawAsMonitor = false, forceDrawBac
     dependencies: {
       loadConfig: async () => ({ active, withdrawAsMonitor, pendingTtlHours: 24, identity: { adapter: "on" } }),
       clientFactory: () => ({
-        forceDrawBack: async (requestId, options) => {
+        deleteRequest: async (requestId, options) => {
           calls.push({ requestId, options });
-          if (forceDrawBack) return forceDrawBack(requestId, options);
+          if (deleteRequest) return deleteRequest(requestId, options);
           return { requestId };
         },
       }),
@@ -58,14 +58,14 @@ async function setup(t, { active = true, withdrawAsMonitor = false, forceDrawBac
   return { store, calls, run };
 }
 
-test("只有一张已提交的单：不报单号也直接撤回，以申请人身份收回并记 withdrawn", async (t) => {
+test("只有一张已提交的单：不报单号也直接撤销，以申请人身份删除并记 withdrawn", async (t) => {
   const { store, calls, run } = await setup(t);
   const id = await seedSubmitted(store, { requestId: "1600001" });
   const result = await run({});
   assert.equal(result.code, "WITHDRAWN");
   assert.equal(result.requestId, "1600001");
   assert.deepEqual(calls, [{ requestId: "1600001", options: { operatorUserId: "13437", asMonitor: false } }]);
-  assert.equal(result.replyZh, "↩️ **已撤回**\n🎫 工单号：1600001\n\n这张单已从处理人那里收回，退回到你的 OA 待办。\n要修改后重新提交或作废，请到 OA 里操作。");
+  assert.equal(result.replyZh, "🗑️ **已撤销**\n🎫 工单号：1600001\n\n这张单已从 OA 删除，处理人那边不会再看到。\n还有问题直接发给我，重新建单。");
   assert.equal((await getTicket(store, id)).status, "withdrawn");
 
   const again = await run({ requestId: "1600001" });
@@ -84,14 +84,14 @@ test("多张已提交且没报单号：列出最近的单号请员工选，不�
   assert.equal(calls.length, 0);
   assert.match(result.replyZh, /🎫 工单号：1600001/);
   assert.match(result.replyZh, /🎫 工单号：1600002/);
-  assert.match(result.replyZh, /请回复要撤回的工单号/);
+  assert.match(result.replyZh, /请回复要撤销的工单号/);
 
   const picked = await run({ requestId: " 1600002 " });
   assert.equal(picked.code, "WITHDRAWN");
   assert.equal(calls[0].requestId, "1600002");
 });
 
-test("只能撤回自己的单：别人的单号、没经小A提交的单号都当查不到", async (t) => {
+test("只能撤销自己的单：别人的单号、没经小A提交的单号都当查不到", async (t) => {
   const { store, calls, run } = await setup(t);
   await seedSubmitted(store, { sender: "wecom-user-2", requestId: "1600009" });
   assert.equal((await run({ requestId: "1600009" })).code, "WITHDRAW_NOT_FOUND");
@@ -101,14 +101,14 @@ test("只能撤回自己的单：别人的单号、没经小A提交的单号都�
   assert.equal(calls.length, 0);
 });
 
-test("OA 拒绝收回：NO_PERMISSION 提示联系处理人，结果不明提示再试，本地仍是 submitted", async (t) => {
+test("OA 拒绝删除：NO_PERMISSION 提示联系处理人，结果不明提示再试，本地仍是 submitted", async (t) => {
   let next = new OAClientError("denied", { code: "NO_PERMISSION" });
-  const { store, run } = await setup(t, { forceDrawBack: async () => { throw next; } });
+  const { store, run } = await setup(t, { deleteRequest: async () => { throw next; } });
   const id = await seedSubmitted(store, { requestId: "1600003" });
 
   const denied = await run({});
   assert.equal(denied.code, "WITHDRAW_DENIED");
-  assert.match(denied.replyZh, /撤回不了[\s\S]*1600003[\s\S]*联系处理人/);
+  assert.match(denied.replyZh, /撤销不了[\s\S]*1600003[\s\S]*联系处理人/);
   assert.equal((await getTicket(store, id)).status, "submitted");
 
   next = new OAClientError("unknown", { code: "NETWORK_OUTCOME_UNKNOWN", ambiguous: true });
@@ -122,7 +122,7 @@ test("OA 拒绝收回：NO_PERMISSION 提示联系处理人，结果不明提示
   assert.equal((await getTicket(store, id)).status, "submitted");
 });
 
-test("withdrawAsMonitor 打开时用监控权限收回；桥接未激活时不调 OA", async (t) => {
+test("withdrawAsMonitor 打开时用监控权限删除；桥接未激活时不调 OA", async (t) => {
   const monitor = await setup(t, { withdrawAsMonitor: true });
   await seedSubmitted(monitor.store, { requestId: "1600004" });
   assert.equal((await monitor.run({})).code, "WITHDRAWN");
@@ -132,14 +132,14 @@ test("withdrawAsMonitor 打开时用监控权限收回；桥接未激活时不�
   await seedSubmitted(inactive.store, { requestId: "1600005" });
   const result = await inactive.run({});
   assert.equal(result.code, "OA_BRIDGE_INACTIVE");
-  assert.match(result.replyZh, /暂时不能撤回/);
+  assert.match(result.replyZh, /暂时不能撤销/);
   assert.equal(inactive.calls.length, 0);
 });
 
-test("同一张单并发撤回只打一次 OA", async (t) => {
+test("同一张单并发撤销只打一次 OA", async (t) => {
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
-  const { store, calls, run } = await setup(t, { forceDrawBack: async (requestId) => { await gate; return { requestId }; } });
+  const { store, calls, run } = await setup(t, { deleteRequest: async (requestId) => { await gate; return { requestId }; } });
   await seedSubmitted(store, { requestId: "1600006" });
   const first = run({});
   await new Promise((resolve) => setTimeout(resolve, 20));
@@ -150,7 +150,7 @@ test("同一张单并发撤回只打一次 OA", async (t) => {
   assert.equal(calls.length, 1);
 });
 
-test("撤回后查进度：已提交列表不再含这张单", async (t) => {
+test("撤销后查进度：已提交列表不再含这张单", async (t) => {
   const { store, run } = await setup(t);
   await seedSubmitted(store, { requestId: "1600007" });
   await seedSubmitted(store, { requestId: "1600008" });

@@ -26,7 +26,7 @@ OA 桥接插件 `oa-workflow-bridge`（工具 `oa_workflow`）的唯一正文：
            ├── src/identity/   企微 user/get → 工号 → getHrmUserInfoWithPage → OA 人员 id
            ├── MySQL           oa_ticket / oa_inbox / oa_identity
            ├── 本机 staging     {OPENCLAW_STATE_DIR}/oa-workflow-bridge/staging/
-           └── Ecology         applytoken → getHrmSimpleInfo → doCreateRequest（流程 602）；撤回走 doForceDrawBack
+           └── Ecology         applytoken → getHrmSimpleInfo → doCreateRequest（流程 602）；撤销走 deleteRequest
 ```
 
 模型只整理文字（类型、系统、描述）；身份、确认态、幂等、附件、处理人、建单都由插件做。员工可见「已建单」只认 `SUBMITTED` + 数字 `requestId`。
@@ -79,7 +79,7 @@ prepare ──► awaiting_confirmation ──submit──► submitting ──O
                  ├── cancel ──► cancelled
                  └── 满 24 小时 ──► expired
 
-submitted ──withdraw（OA 强制收回成功）──► withdrawn
+submitted ──withdraw（OA 删除流程成功）──► withdrawn
 ```
 
 - 占「同一人全局一张待确认」名额的状态：`awaiting_confirmation`、`submitting`、`unknown`。此时 `active_sender = sender_code`，唯一索引在库层面保证一人一张；其余状态 `active_sender = NULL`。
@@ -164,7 +164,7 @@ AGENTS.md 规则零条命中、但确实是 IT 方面的事时，模型不传 `t
 | `OA_PUBLIC_KEY` | OA 给的 RSA 公钥，一整行 base64（必填） |
 | `OA_ACTIVE` | 默认 `false`：确认时回 `OA_BRIDGE_INACTIVE`，不调 OA，待确认单不动。`true` 才真正建单 |
 | `OA_ISNEXTFLOW` | 默认 `0`：建单后停在申请人节点；`1` 自动流转。只认 `0` / `1` |
-| `OA_WITHDRAW_AS_MONITOR` | 默认 `false`：员工撤回时以**申请人**身份调 `doForceDrawBack`。`true`：以接口账号 + `otherParams.ismonitor=1`（监控权限）收回，接口账号须有流程 602 的监控权限。两种方式都只允许撤回本人经小A提交的单（见 6.4.1） |
+| `OA_WITHDRAW_AS_MONITOR` | 默认 `false`：员工撤销时以**申请人**身份调 `deleteRequest`（按流程权限）。`true`：以接口账号 + `otherParams` `{"ismonitor":"1"}`（监控权限）删除，接口账号须有流程 602 的监控权限。两种方式都只允许撤销本人经小A提交的单（见 6.4.1） |
 | `OA_MYSQL_HOST` / `OA_MYSQL_PORT` / `OA_MYSQL_USER` / `OA_MYSQL_DATABASE` / `OA_MYSQL_PASSWORD` | 独立 MySQL（端口默认 3306） |
 | `OA_APP_SECRET` / `OA_API_USER_ID` | OA AppSecret；接口账号人员 id（只用于换 token 与只读预检） |
 | `WECOM_IDENTITY_CORPID` / `WECOM_IDENTITY_SECRET` | 企微自建应用，身份转换用 |
@@ -215,7 +215,7 @@ Schema `additionalProperties: false`。可信上下文必须是：`messageChanne
 | `submit_confirmed` | `active=false` 不写；否则标 `submitting`，结果写 `submitted` / `failed` / `unknown` | `getHrmSimpleInfo` → `doCreateRequest` |
 | `status` | 只在发现到期单时记 `expired` | 否 |
 | `cancel` | 记 `cancelled`，删附件 | 否 |
-| `withdraw` | OA 收回成功才记 `withdrawn`；失败不改 | `doForceDrawBack` |
+| `withdraw` | OA 删除成功才记 `withdrawn`；失败不改 | `deleteRequest` |
 
 ### 6.1 `prepare`
 
@@ -258,11 +258,11 @@ Schema `additionalProperties: false`。可信上下文必须是：`messageChanne
 
 `cancel`：原发送人、跨对话也可。已到期 → `CONFIRMATION_EXPIRED`（记 `expired`）；提交中 / 待对账 → `RECONCILIATION_REQUIRED`。成功 `CANCELLED`。
 
-`status` 带 `confirmationId` 查到已撤回的单 → `WITHDRAWN`。
+`status` 带 `confirmationId` 查到已撤销的单 → `WITHDRAWN`。
 
-### 6.4.1 `withdraw`（撤回已提交的工单）
+### 6.4.1 `withdraw`（撤销已提交的工单）
 
-员工要把已经提交到 OA 的单收回时调用，走 Ecology「强制收回」`POST /api/workflow/paService/doForceDrawBack`（见《Ecology 流程创建 API 说明》第 5 节）。只在 `oa_ticket` 里找**本人**（`sender_code`）`status=submitted` 的单，别人的单号、没经小A提交的单号一律 `WITHDRAW_NOT_FOUND`，所以模型传错号也撤不了别人的单。
+员工要撤销已经提交到 OA 的单时调用，走 Ecology「删除流程」`POST /api/workflow/paService/deleteRequest`（见《Ecology 流程创建 API 说明》第 5 节），**OA 里的流程会被删除，不可恢复**。只在 `oa_ticket` 里找**本人**（`sender_code`）`status=submitted` 的单，别人的单号、没经小A提交的单号一律 `WITHDRAW_NOT_FOUND`，所以模型传错号也撤不了别人的单。
 
 | 情况 | 回执 | 写库 / 调 OA |
 | --- | --- | --- |
@@ -271,18 +271,18 @@ Schema `additionalProperties: false`。可信上下文必须是：`messageChanne
 | 不带 `requestId`，有多张 | `WITHDRAW_CHOOSE`，列最近 5 张单号请员工回 | 否 |
 | 一张也没有 | `NOTHING_TO_WITHDRAW` | 否 |
 | 单号不是本人经小A提交的 / 不是 submitted | `WITHDRAW_NOT_FOUND` | 否 |
-| 已撤回过 | `ALREADY_WITHDRAWN` | 否 |
+| 已撤销过 | `ALREADY_WITHDRAWN` | 否 |
 | 单号不是数字 | `INVALID_REQUEST_ID` | 否 |
-| `OA_ACTIVE=false` | `OA_BRIDGE_INACTIVE`（「暂时不能撤回」） | 否 |
-| 同一张正在撤回 | `WITHDRAWING` | 否 |
-| OA `SUCCESS` | `WITHDRAWN`，`replyZh`「已撤回」卡 | 记 `withdrawn` |
-| OA `NO_PERMISSION`（多半处理人已办理 / 节点不允许收回） | `WITHDRAW_DENIED`，请联系处理人 | 不改 |
-| 结果不明（网络中断、`HTTP_5xx`、`SYSTEM_INNER_ERROR`、非 JSON） | `WITHDRAW_OUTCOME_UNKNOWN`，请稍后再说一次「撤回」 | 不改 |
+| `OA_ACTIVE=false` | `OA_BRIDGE_INACTIVE`（「暂时不能撤销」） | 否 |
+| 同一张正在撤销 | `WITHDRAWING` | 否 |
+| OA `SUCCESS` | `WITHDRAWN`，`replyZh`「已撤销」卡 | 记 `withdrawn` |
+| OA `NO_PERMISSION`（多半处理人已办理 / 节点不允许删除） | `WITHDRAW_DENIED`，请联系处理人 | 不改 |
+| 结果不明（网络中断、`HTTP_5xx`、`SYSTEM_INNER_ERROR`、非 JSON） | `WITHDRAW_OUTCOME_UNKNOWN`，请员工先到 OA 看单子还在不在，在就再说一次「撤销」 | 不改 |
 | 其它拒绝（`PARAM_ERROR`、`USER_EXCEPTION`、`HTTP_4xx`、token 失败等） | `WITHDRAW_REJECTED`，联系管理员 | 不改 |
 
-失败回执都带 `oaCode`（OA 原码）。强制收回可以安全重试，所以结果不明时不进 `unknown`，本地仍是 `submitted`，员工再说一次即可。OA 已收回但写库失败：仍回 `WITHDRAWN`，日志 `OA withdrew requestId=… but local persist failed`，台账留 `submitted`，以 OA 为准。
+失败回执都带 `oaCode`（OA 原码）。结果不明时不进 `unknown`，本地仍是 `submitted`：OA 实际没删，员工再说一次即可；OA 实际已删，再试时 OA 会报错（员工看到「撤销失败」），以 OA 为准。OA 已删除但写库失败：仍回 `WITHDRAWN`，日志 `OA deleted requestId=… but local persist failed`，台账留 `submitted`，以 OA 为准。
 
-请求：Header `userid` = RSA(申请人人员 id，取 `oa_ticket.oa_requester_id`)，Body `{"requestId": 1504371}`；`OA_WITHDRAW_AS_MONITOR=true` 时 Header 为接口账号、Body 加 `"otherParams":{"ismonitor":"1"}`。OA 非 `SUCCESS` 时打 `[OA_DRAWBACK_REJECTED]`（脱敏后的 `code` / `errMsg`）。收回后流程退回申请人 OA 待办，**不会删除**，员工在 OA 里改了重提或自行删除；`scripts/reconcile.mjs` 把 `withdrawn` 单单列为 `withdrawnByEmployee`，不算异常。
+请求：Header `userid` = RSA(申请人人员 id，取 `oa_ticket.oa_requester_id`)，Body `{"requestId":"1504371"}`（文档类型 String）；`OA_WITHDRAW_AS_MONITOR=true` 时 Header 为接口账号、Body 加 `"otherParams":"{\"ismonitor\":\"1\"}"`（字符串）。OA 非 `SUCCESS` 时打 `[OA_DELETE_REJECTED]`（脱敏后的 `code` / `errMsg`）。删除后 OA 导出里找不到这张单是正常的：`scripts/reconcile.mjs` 把 `withdrawn` 单单列为 `withdrawnByEmployee`，不算缺失；`scripts/stats.mjs` 的提交数仍计入。
 
 ### 6.5 错误码与 `hintZh`
 
@@ -298,7 +298,7 @@ Schema `additionalProperties: false`。可信上下文必须是：`messageChanne
 | 这张单已经提交过（带工单号） | `ALREADY_SUBMITTED` |
 | 底稿问题，让模型改了再试 | `DRAFT_INVALID` / `INVALID_TICKET_TYPE` / `SYSTEM_NOT_ALLOWED` / `SYSTEM_UNMAPPED` / `INVALID_LOCATION` / `LOCATION_MISMATCH` / `INVALID_DEMAND_TYPE` / `INVALID_MONTHLY_HOURS` / `SUPPLEMENT_TOO_LONG` |
 | 配置缺失，联系管理员 | `HANDLER_NOT_CONFIGURED` / `ATTACHMENT_FIELD_NOT_CONFIGURED` |
-| 撤回（`withdraw` 自带卡片） | `WITHDRAWN` / `ALREADY_WITHDRAWN` / `WITHDRAW_CHOOSE` / `NOTHING_TO_WITHDRAW` / `WITHDRAW_NOT_FOUND` / `WITHDRAW_DENIED` / `WITHDRAW_REJECTED` / `WITHDRAW_OUTCOME_UNKNOWN` / `WITHDRAWING` / `INVALID_REQUEST_ID` |
+| 撤销（`withdraw` 自带卡片） | `WITHDRAWN` / `ALREADY_WITHDRAWN` / `WITHDRAW_CHOOSE` / `NOTHING_TO_WITHDRAW` / `WITHDRAW_NOT_FOUND` / `WITHDRAW_DENIED` / `WITHDRAW_REJECTED` / `WITHDRAW_OUTCOME_UNKNOWN` / `WITHDRAWING` / `INVALID_REQUEST_ID` |
 | 其它 | `MISSING_CONFIRMATION_ID`、`STAGING_MISSING`、`SENDER_MISMATCH`、`NOT_FOUND`、`NO_NEW_ATTACHMENT`、`ATTACHMENT_LIMIT_EXCEEDED` |
 
 `DB_UNAVAILABLE`：运行时连不上库或库报错；`DB_SCHEMA_MISSING`：预检发现表不在。
@@ -311,7 +311,7 @@ Schema `additionalProperties: false`。可信上下文必须是：`messageChanne
 cd OA_tool/oa-workflow-bridge && npm install && npm test
 ```
 
-覆盖：字段映射与兜底、OA 客户端、资料现查、身份转换与缓存、六个 action（确认 / 幂等 / 并发提交 / 跨会话 / 附件追加与 inbox / 过期 / 对账态 / 撤回）、到期回收与孤儿目录、库层唯一约束、预检、日志脱敏、`AGENTS.md` ↔ `systems.json` 一致性。
+覆盖：字段映射与兜底、OA 客户端、资料现查、身份转换与缓存、六个 action（确认 / 幂等 / 并发提交 / 跨会话 / 附件追加与 inbox / 过期 / 对账态 / 撤销）、到期回收与孤儿目录、库层唯一约束、预检、日志脱敏、`AGENTS.md` ↔ `systems.json` 一致性。
 
 真实 MySQL 集成测试默认跳过，指向**测试库**时才跑（会清空三张表）：
 
