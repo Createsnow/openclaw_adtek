@@ -44,6 +44,7 @@
 │   └── workspace/                   # 运行时注入的 AGENTS.md 等（唯一规则源）
 └── OA_tool/
     ├── oa-workflow-bridge/          # OA 桥接插件（含身份转换 src/identity/；状态存 MySQL；随镜像发布）
+    │   ├── sql/                     # 建表语句 schema.sql 与按日期命名的迁移脚本（老库升级由 DBA 执行）
     │   └── scripts/                 # 只读预检、身份点查、使用统计 stats、OA 对账 reconcile
     └── *.md                         # OA / 身份专题文档
 ```

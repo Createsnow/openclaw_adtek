@@ -636,7 +636,7 @@ SELECT status, COUNT(*) FROM xa_oa.oa_ticket GROUP BY status;
 | `~/xa/secrets/` | 企微插件（能从 npm 重装）、OA 插件源码（在本仓库与镜像里） |
 | `~/xa/docker-compose.yml`、`entrypoint.sh` | — |
 | `~/xa/oa-bridge-config.json`（OA 桥接现网配置） | — |
-| OA 状态库 `xa_oa`（独立 MySQL 机器，按 [MySQL 数据库准备.md](MySQL%20数据库准备.md) 第 5 节 `mysqldump`） | — |
+| OA 状态库 `xa_oa`（独立 MySQL 机器，按 [MySQL 数据库准备.md](MySQL%20数据库准备.md) 第 6 节 `mysqldump`） | — |
 
 **不要**把含 `secrets/` 的备份传到公共网盘、不要提交 git。备份文件权限应是 `600`，只放在本机或企业加密盘。
 
@@ -1470,7 +1470,7 @@ docker logs --tail 80 --timestamps xa-gateway
 | 发出去很久才回 | [第 4.2 节](#sec-04-2) `model-fetch` / `kind=final` | 百炼指南 §2.4、§6.7；企微指南 7.4 |
 | `Unknown model` / unresolved | `cat ~/xa/secrets/model_ref.txt; echo` | 前缀必须等于 json 里 `providers` 键名 |
 | `docker exec` 报 Missing env var | — | 可忽略，或用[第 3.4 节](#sec-03-4)带 `-e` 的命令 |
-| OA 预检失败 | 见下方 | `DB_UNAVAILABLE` / `DB_SCHEMA_MISSING` 查 MySQL；其余是 OA 凭据或依赖，见 OA 桥接接入手册 8.2 / 10 |
+| OA 预检失败 | 见下方 | `DB_UNAVAILABLE` / `DB_SCHEMA_MISSING` 查 MySQL；`DB_SCHEMA_OUTDATED` 执行 `sql/` 迁移脚本（MySQL 准备文档第 5 节）；其余是 OA 凭据或依赖，见 OA 桥接接入手册 8.2 / 10 |
 | 员工「确认准备失败」/ 日志 `Cannot find package 'mysql2'` 或 `MySQL init failed` | `docker inspect -f '{{.Config.Image}}' xa-gateway` | 缺包说明没用自建镜像，按 OA 桥接接入手册 4.2 重建；连库失败按该手册第 10 节，再 `down && up` |
 | docker logs 出现 `smartsheet_get_records` | `grep alsoAllow ~/xa/config/openclaw.json` | WeCom 手册 9.2；现网旁路已清。不要为 OA 去重新授权文档 |
 | 员工「还不能提交到 OA」/ `OA_IDENTITY_NOT_CONFIGURED` | `docker logs` grep 不到该码是预期 | 企微到OA身份 9.9 节：先看 `WECOM_IDENTITY_FILES_OK` / `INJECTED`，再抽会话 jsonl |

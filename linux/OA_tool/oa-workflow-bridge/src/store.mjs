@@ -15,7 +15,7 @@ export function createStore(db, { now = () => Date.now() } = {}) {
 
 export { ACTIVE_TICKET_STATUSES };
 const ACTIVE = new Set(ACTIVE_TICKET_STATUSES);
-/** 进入这些状态后清掉描述与附件清单，只留台账（单号、状态、时间）。 */
+/** 进入这些状态后清掉描述与附件清单，只留台账（单号、类型、系统、地点、状态、时间）。 */
 const TERMINAL = new Set(["submitted", "cancelled", "expired", "failed"]);
 /** 查进度「最近记录」列出的状态与条数。 */
 const RECENT_STATUSES = ["submitted", "cancelled", "expired", "failed", "unknown"];
@@ -53,6 +53,9 @@ function rowToTicket(row) {
     session: row.session_code,
     status: row.status,
     oaRequesterId: row.oa_requester_id || "",
+    ticketType: row.ticket_type || null,
+    systemName: row.system_name || null,
+    location: row.location || null,
     draft: parseJson(row.draft_json, null),
     staged: parseJson(row.staged_json, []),
     requestId: row.request_id || null,
@@ -108,8 +111,8 @@ export async function insertTicket(store, ticket) {
   const now = Date.now();
   await store.db.run(
     `INSERT INTO oa_ticket (confirmation_id, external_ticket_id, sender_code, session_code, status, active_sender,
-      oa_requester_id, draft_json, staged_json, expires_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'awaiting_confirmation', ?, ?, ?, ?, ?, ?, ?)`,
+      oa_requester_id, ticket_type, system_name, location, draft_json, staged_json, expires_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'awaiting_confirmation', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       ticket.confirmationId,
       ticket.draft.externalTicketId,
@@ -117,6 +120,9 @@ export async function insertTicket(store, ticket) {
       ticket.session,
       ticket.identity,
       ticket.oaRequesterId,
+      ticket.draft.ticketType || null,
+      ticket.draft.systemName || null,
+      ticket.draft.location || null,
       JSON.stringify(ticket.draft),
       JSON.stringify(ticket.staged || []),
       ticket.expiresAt,

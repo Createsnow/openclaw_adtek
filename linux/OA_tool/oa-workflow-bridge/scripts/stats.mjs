@@ -11,6 +11,8 @@ const daysArg = process.argv.indexOf("--days");
 const days = daysArg > 0 ? Number(process.argv[daysArg + 1]) : 30;
 const since = Date.now() - days * 24 * 60 * 60 * 1000;
 
+const toCounts = (row) => ({ name: row.name, prepared: Number(row.prepared), submitted: Number(row.submitted || 0) });
+
 const db = await createMysqlDb((await loadBridgeConfig()).mysql);
 try {
   const byStatus = await db.query(
@@ -30,11 +32,17 @@ try {
        FROM oa_ticket WHERE created_at >= ? GROUP BY day ORDER BY day`,
     [since],
   );
-  const perSystem = await db.query(
-    `SELECT JSON_UNQUOTE(JSON_EXTRACT(draft_json, '$.systemName')) AS systemName, COUNT(*) AS n
-       FROM oa_ticket WHERE created_at >= ? AND draft_json IS NOT NULL GROUP BY systemName ORDER BY n DESC`,
+  // 类型 / 系统 / 地点是 prepare 时写入的列，终态后保留；本日期前的历史单为 NULL（显示为「未记录」）。
+  const breakdown = (column) => db.query(
+    `SELECT COALESCE(${column}, '未记录') AS name, COUNT(*) AS prepared, SUM(status = 'submitted') AS submitted
+       FROM oa_ticket WHERE created_at >= ? GROUP BY name ORDER BY prepared DESC`,
     [since],
   );
+  const [byType, bySystem, byLocation] = await Promise.all([
+    breakdown("ticket_type"),
+    breakdown("system_name"),
+    breakdown("location"),
+  ]);
   const pendingReconcile = await db.query(
     "SELECT COUNT(*) AS n FROM oa_ticket WHERE status IN ('unknown', 'submitting')",
   );
@@ -44,7 +52,9 @@ try {
     users: Number(people[0]?.users || 0),
     usersWithSubmitted: Number(people[0]?.submitters || 0),
     perDay: perDay.map((row) => ({ day: row.day, prepared: Number(row.prepared), submitted: Number(row.submitted) })),
-    activeBySystem: perSystem.map((row) => ({ systemName: row.systemName, count: Number(row.n) })),
+    byTicketType: byType.map(toCounts),
+    bySystem: bySystem.map(toCounts),
+    byLocation: byLocation.map(toCounts),
     awaitingReconciliation: Number(pendingReconcile[0]?.n || 0),
   }, null, 2));
 } finally {

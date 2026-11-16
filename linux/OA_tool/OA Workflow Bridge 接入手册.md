@@ -57,6 +57,7 @@
 | `src/inbound-media.mjs` / `src/attachments.mjs` / `src/image-embed.mjs` | 找出 inbound 路径、落盘 / 搬运附件、图片压缩 / 文档 base64 |
 | `src/hints.mjs` | 没有专门卡片时的员工短句（`hintZh`，也作 `replyZh` 兜底） |
 | `systems.json` | 所属系统 → OA 选项 ID、处理人 id、处理人姓名、允许的工单类型（唯一维护处） |
+| `sql/` | `schema.sql` 建表语句（与 `src/db.mjs` 一致，测试校验）；`YYYYMMDD_*.sql` 老库迁移脚本，DBA 手工执行 |
 | `scripts/` | `readonly-preflight.mjs` 只读预检、`stats.mjs` 使用统计、`reconcile.mjs` 与 OA 对账、`manual-resolve.mjs` 身份排查 |
 
 ---
@@ -67,13 +68,14 @@
 
 | 表 | 一行是什么 | 主要列 | 回收 |
 | --- | --- | --- | --- |
-| `oa_ticket` | 一张确认单 | `confirmation_id`（PK）、`external_ticket_id`、`sender_code`、`session_code`、`status`、`active_sender`（唯一）、`draft_json`、`staged_json`、`request_id`、`error_code`、`expires_at` | 不删。终态时清空 `draft_json` / `staged_json`，只留台账 |
+| `oa_ticket` | 一张确认单 | `confirmation_id`（PK）、`external_ticket_id`、`sender_code`、`session_code`、`status`、`active_sender`（唯一）、`ticket_type`、`system_name`、`location`、`draft_json`、`staged_json`、`request_id`、`error_code`、`expires_at` | 不删。终态时清空 `draft_json` / `staged_json`；单号、类型、系统、地点、状态、时间留作台账 |
 | `oa_inbox` | 一个人收到但还没进工单的附件 | `sender_code`（PK）、`session_codes`、`state_json`（附件、去重键、超限计数、过期提示）、`expires_at` | 30 分钟不动即过期（下一次回执提示员工，一天后定时删）；`/new`、`session_end`、换对话时立刻删 |
 | `oa_identity` | 发送人 → OA 人员 id 缓存 | `mapping_code`（PK）、`oa_user_id`、`miss_code`、`expires_at` | 命中 24 小时；查不到的负缓存 10 分钟 |
 
 - `sender_code` / `mapping_code` = SHA-256(企微加密 SenderId 转小写) 截前 24 位；`session_code` 同理来自 OpenClaw `sessionId`（无则 `sessionKey`）。原始 SenderId、明文 userid、工号**不落库**。
 - 时间都是毫秒 BIGINT，不依赖 MySQL 时区。JSON 存 TEXT，由插件序列化。
-- 建表语句在 `src/db.mjs`。插件启动时 `CREATE TABLE IF NOT EXISTS`，库本身由 DBA 先建（见 MySQL 准备文档）。
+- `ticket_type` / `system_name` / `location` 在 prepare 时从校验后的 draft 写入（未命中兜底即「运维支持」/「其他」；地点按 A–F 或系统名括号得出，得不出为 NULL），终态后保留，供统计与审计。
+- 建表语句在 `src/db.mjs`，独立副本在 `sql/schema.sql`（测试校验两者一致）。插件启动时 `CREATE TABLE IF NOT EXISTS`，库本身由 DBA 先建（见 MySQL 准备文档）。`CREATE TABLE IF NOT EXISTS` 不会给老表补列：改表时在 `sql/` 加一份 `YYYYMMDD_*.sql` 迁移脚本，由 DBA 在上新镜像**之前**执行；漏执行时只读预检报 `DB_SCHEMA_OUTDATED`。
 
 ### 2.2 工单状态
 
@@ -89,7 +91,7 @@ prepare ──► awaiting_confirmation ──submit──► submitting ──O
 ```
 
 - 占「同一人全局一张待确认」名额的状态：`awaiting_confirmation`、`submitting`、`unknown`。此时 `active_sender = sender_code`，唯一索引在库层面保证一人一张；其余状态 `active_sender = NULL`。
-- 进入 `submitted` / `cancelled` / `expired` / `failed` 时清空描述与附件清单（员工资料随之删除），保留单号、状态、时间供对账。
+- 进入 `submitted` / `cancelled` / `expired` / `failed` 时清空描述与附件清单（员工资料随之删除），保留单号、类型、系统、地点、状态、时间供对账与统计。
 - 同一内部幂等号（`external_ticket_id`）可能有多行：取消 / 过期后同一条消息可再 prepare。幂等判断看最新一行：`submitted` → `ALREADY_SUBMITTED`；`submitting` / `unknown` → `RECONCILIATION_REQUIRED`；仍有效的待确认 → 由新单替换。
 
 ### 2.3 到期回收
@@ -338,7 +340,7 @@ Schema `additionalProperties: false`。可信上下文必须是：`messageChanne
 | 员工侧 | `code` |
 | --- | --- |
 | 还不能提交到 OA（账号未开通） | `OA_IDENTITY_NOT_FOUND` / `OA_IDENTITY_NOT_CONFIGURED` / `OA_IDENTITY_MAPPING_REQUIRED` / `OA_IDENTITY_INACTIVE` / `WECOM_IDENTITY_TOKEN_FAILED` / `WECOM_IDENTITY_OUT_OF_SCOPE` / `WECOM_IDENTITY_ALIGN_MISMATCH` / `WECOM_IDENTITY_INVALID_SENDER` |
-| 确认准备失败，请稍后重试 | `OA_IDENTITY_LOOKUP_FAILED` / `OA_IDENTITY_AMBIGUOUS` / `WECOM_OPENUSERID_INVALID` / `OA_PROFILE_INCOMPLETE` / `OA_PROFILE_LOOKUP_FAILED` / `VALIDATION_ERROR` / `NOT_CONFIGURED` / `INVALID_CONFIGURATION` / `TOKEN_NETWORK_ERROR` / `TOKEN_REJECTED` / `UNTRUSTED_CONTEXT` / `DB_UNAVAILABLE` / `DB_SCHEMA_MISSING` / `WORKFLOW_NOT_CREATEABLE` / `PREFLIGHT_FAILED` |
+| 确认准备失败，请稍后重试 | `OA_IDENTITY_LOOKUP_FAILED` / `OA_IDENTITY_AMBIGUOUS` / `WECOM_OPENUSERID_INVALID` / `OA_PROFILE_INCOMPLETE` / `OA_PROFILE_LOOKUP_FAILED` / `VALIDATION_ERROR` / `NOT_CONFIGURED` / `INVALID_CONFIGURATION` / `TOKEN_NETWORK_ERROR` / `TOKEN_REJECTED` / `UNTRUSTED_CONTEXT` / `DB_UNAVAILABLE` / `DB_SCHEMA_MISSING` / `DB_SCHEMA_OUTDATED` / `WORKFLOW_NOT_CREATEABLE` / `PREFLIGHT_FAILED` |
 | OA 拒绝了这张单，不要自动再提交 | `PARAM_ERROR` / `OA_CREATE_REJECTED` / `OA_ERROR` / `FAILED` / `HTTP_4xx` |
 | OA 需要人工核对 | `RECONCILIATION_REQUIRED` / `NETWORK_OUTCOME_UNKNOWN` / `SYSTEM_INNER_ERROR` / `MISSING_REQUEST_ID` / `INVALID_RESPONSE` / `UNKNOWN` / `SUBMITTING` / `HTTP_5xx` |
 | 确认单已过期 | `CONFIRMATION_EXPIRED` |
@@ -347,7 +349,7 @@ Schema `additionalProperties: false`。可信上下文必须是：`messageChanne
 | 配置缺失，联系管理员 | `HANDLER_NOT_CONFIGURED` / `ATTACHMENT_FIELD_NOT_CONFIGURED` |
 | 其它 | `MISSING_CONFIRMATION_ID`、`STAGING_MISSING`、`SENDER_MISMATCH`、`NOT_FOUND`、`NO_NEW_ATTACHMENT`、`ATTACHMENT_LIMIT_EXCEEDED` |
 
-`DB_UNAVAILABLE`：运行时连不上库或库报错；`DB_SCHEMA_MISSING`：预检发现表不在。
+`DB_UNAVAILABLE`：运行时连不上库或库报错；`DB_SCHEMA_MISSING`：预检发现表不在；`DB_SCHEMA_OUTDATED`：表在但缺新列（`sql/` 迁移脚本没执行）。
 
 ---
 
@@ -375,13 +377,14 @@ Gateway 起来、secret 已注入后：
 docker exec -it xa-gateway sh -c 'export OA_MYSQL_PASSWORD="$(tr -d "\n" < /run/secrets/oa_mysql_password)" OA_API_USER_ID="$(tr -d "\n" < /run/secrets/oa_api_user_id)" OA_APP_SECRET="$(tr -d "\n" < /run/secrets/oa_app_secret)"; node /opt/xa/oa-workflow-bridge/scripts/readonly-preflight.mjs'
 ```
 
-先连库并检查三张表（不建表、不写数据），再调 `getCreateWorkflowList`（不建单）。
+先连库并检查三张表和后加的列（不建表、不改表、不写数据），再调 `getCreateWorkflowList`（不建单）。
 
 | 结果 | 退出码 |
 | --- | --- |
 | `{"ok":true,"code":"READ_ONLY_PREFLIGHT_PASSED","workflowId":602,"db":"OK",…}` | 0 |
 | `DB_UNAVAILABLE`（连不上 / 密码错 / 无权限，未调 OA） | 1 |
 | `DB_SCHEMA_MISSING`（表还没建：Gateway 至少启动成功过一次才会建） | 1 |
+| `DB_SCHEMA_OUTDATED`（老库缺新列：DBA 按日期执行 `sql/` 下的迁移脚本） | 1 |
 | `WORKFLOW_NOT_CREATEABLE`（库通，流程 602 对接口账号不可创建） | 2 |
 | `PREFLIGHT_FAILED` / OA 客户端码（如 `NOT_CONFIGURED`） | 1 |
 
@@ -408,7 +411,7 @@ SELECT confirmation_id, request_id, error_code, FROM_UNIXTIME(updated_at / 1000)
 docker exec -it xa-gateway sh -c 'export OA_MYSQL_PASSWORD="$(tr -d "\n" < /run/secrets/oa_mysql_password)"; node /opt/xa/oa-workflow-bridge/scripts/stats.mjs --days 30'
 ```
 
-输出 JSON：各状态单数、使用人数、成功提交过的人数、每日建单 / 提交、各所属系统待确认数、待对账数。不含员工身份。
+输出 JSON：各状态单数、使用人数、成功提交过的人数、每日建单 / 提交、按工单类型 / 所属系统 / 地点的建单与提交数（`byTicketType` / `bySystem` / `byLocation`，含已结束的单；加列之前的历史单记「未记录」）、待对账数。不含员工身份。
 
 与 OA 逐号对账（复盘「台账对账」项）：先从 OA 导出同期流程 602 的单号清单（CSV / 文本，每行含数字单号），拷进容器后：
 
@@ -416,7 +419,7 @@ docker exec -it xa-gateway sh -c 'export OA_MYSQL_PASSWORD="$(tr -d "\n" < /run/
 docker exec -it xa-gateway sh -c 'export OA_MYSQL_PASSWORD="$(tr -d "\n" < /run/secrets/oa_mysql_password)"; node /opt/xa/oa-workflow-bridge/scripts/reconcile.mjs --oa /tmp/oa-export.csv'
 ```
 
-输出小A成功提交数、在 OA 里找到的数、`missingInOa`（小A记成功但 OA 清单没有）与 `notMarkedSubmitted`（有 OA 单号但小A记成待对账等）。不带 `--oa` 则导出小A成功单号 CSV。
+输出小A成功提交数、在 OA 里找到的数、`missingInOa`（小A记成功但 OA 清单没有）与 `notMarkedSubmitted`（有 OA 单号但小A记成待对账等），两者都带工单类型与所属系统。不带 `--oa` 则导出小A有 OA 单号的单（CSV：单号、内部工单号、类型、系统、地点、状态、时间）。
 
 `unknown` 的处理：在 OA 里按流程标题 `[IT-…]` 或时间找这张单。找到了 → 告诉员工单号；没找到 → 让员工重新报。确认后可由 DBA 把该行 `status` 改成 `submitted`（补 `request_id`）或 `failed`，同时 `active_sender = NULL` 释放名额。
 

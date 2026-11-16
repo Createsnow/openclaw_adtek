@@ -2,7 +2,7 @@
 
 适用对象：给 OA 桥接插件 `oa-workflow-bridge` 准备数据库的运维 / DBA。
 
-前提：MySQL 装在**独立机器**上（裸装，已有管理员账号），Gateway 虚机通过局域网连它。插件只需要一个库、一个账号；表由插件启动时自动创建。表结构、读写方式见 [OA_tool/OA Workflow Bridge 接入手册.md](OA_tool/OA%20Workflow%20Bridge%20接入手册.md) 第 2 节。
+前提：MySQL 装在**独立机器**上（裸装，已有管理员账号），Gateway 虚机通过局域网连它。插件只需要一个库、一个账号；表由插件启动时自动创建（建表语句的独立副本在 `OA_tool/oa-workflow-bridge/sql/schema.sql`，也可先手工执行）。表结构、读写方式见 [OA_tool/OA Workflow Bridge 接入手册.md](OA_tool/OA%20Workflow%20Bridge%20接入手册.md) 第 2 节。
 
 | 项 | 要求 |
 | --- | --- |
@@ -76,7 +76,21 @@ SHOW TABLES FROM xa_oa;   -- oa_identity / oa_inbox / oa_ticket
 
 3. 跑插件只读预检（接入手册 8.2），结果含 `"db":"OK"`。
 
-## 5. 备份
+## 5. 老库升级（加列）
+
+插件启动只做 `CREATE TABLE IF NOT EXISTS`，**不会给已有的表补列**。每次改表在 `OA_tool/oa-workflow-bridge/sql/` 下加一份 `YYYYMMDD_*.sql`，升级镜像前由 DBA 按文件名日期顺序执行没执行过的脚本：
+
+| 脚本 | 内容 |
+| --- | --- |
+| `20261116_oa_ticket_type_system_location.sql` | `oa_ticket` 加 `ticket_type` / `system_name` / `location`，并从未结束单的 `draft_json` 回填；已结束的历史单为 NULL |
+
+```bash
+mysql -h <MySQL 主机> -u <有 ALTER 权限的账号> -p xa_oa < 20261116_oa_ticket_type_system_location.sql
+```
+
+执行后跑插件只读预检（接入手册 8.2），不再报 `DB_SCHEMA_OUTDATED` 即可上新镜像。顺序反了（先上镜像）会导致建单失败，补执行脚本即恢复，无需重启。
+
+## 6. 备份
 
 - 开 binlog 或至少每日 `mysqldump`：
 
@@ -87,7 +101,7 @@ mysqldump --single-transaction --routines xa_oa > xa_oa_$(date +%F).sql
 - `oa_ticket` 是工单台账（幂等与对账依据），按普通业务库保留；`oa_inbox` / `oa_identity` 是短期缓存，丢了会自动重建。
 - 恢复后不用改插件配置；Gateway 下次调用会自动重连。
 
-## 6. 不要做
+## 7. 不要做
 
 - 不要把密码写进 `bridge-config.json`、`openclaw.json` 或 compose `environment:`。
 - 不要让两个 Gateway 连同一个库。

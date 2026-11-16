@@ -1112,6 +1112,58 @@ test("submitNow：员工原话要求直接提交时，一次调用建单并提�
   assert.equal(await getActiveTicket(stateStore, (await getTicket(stateStore, (await stateStore.db.query("SELECT confirmation_id FROM oa_ticket"))[0].confirmation_id)).identity), null);
 });
 
+test("台账保留工单类型 / 所属系统 / 地点：提交后描述清空，三列仍在", async (t) => {
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "xa-oa-ledger-"));
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+  await mkdir(path.join(stateDir, "media", "inbound"), { recursive: true });
+  const stateStore = createTestStore();
+  const factory = createOAWorkflowToolFactory({
+    stateDir,
+    stateStore,
+    dependencies: dependencies({ createRequest: async () => ({ requestId: "1600002" }) }),
+  });
+  const prepared = parse(await factory(context()).execute("call-1", {
+    action: "prepare",
+    draft: { ...draft("IT-20260805-121800-LDG1"), location: "D" },
+  }));
+  assert.equal(prepared.code, "AWAITING_CONFIRMATION");
+  const pending = await getTicket(stateStore, prepared.confirmationId);
+  assert.deepEqual(
+    [pending.ticketType, pending.systemName, pending.location],
+    ["运维支持", "MES系统（越南B部）", "越南"],
+  );
+
+  const submitted = parse(await factory(context()).execute("call-2", {
+    action: "submit_confirmed",
+    confirmationId: prepared.confirmationId,
+  }));
+  assert.equal(submitted.code, "SUBMITTED");
+  const ledger = await getTicket(stateStore, prepared.confirmationId);
+  assert.equal(ledger.status, "submitted");
+  assert.equal(ledger.draft, null, "终态清掉描述");
+  assert.deepEqual(
+    [ledger.ticketType, ledger.systemName, ledger.location, ledger.requestId],
+    ["运维支持", "MES系统（越南B部）", "越南", "1600002"],
+  );
+});
+
+test("规则未命中兜底的单：台账记运维支持 / 其他，地点为空", async (t) => {
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "xa-oa-ledger-"));
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+  await mkdir(path.join(stateDir, "media", "inbound"), { recursive: true });
+  const stateStore = createTestStore();
+  const factory = createOAWorkflowToolFactory({
+    stateDir,
+    stateStore,
+    dependencies: dependencies({ createRequest: async () => ({ requestId: "1600003" }) }),
+  });
+  const { ticketType: _type, systemName: _system, ...rest } = draft("IT-20260805-121900-LDG2");
+  const prepared = parse(await factory(context()).execute("call-1", { action: "prepare", draft: rest }));
+  assert.equal(prepared.code, "AWAITING_CONFIRMATION");
+  const pending = await getTicket(stateStore, prepared.confirmationId);
+  assert.deepEqual([pending.ticketType, pending.systemName, pending.location], ["运维支持", "其他", null]);
+});
+
 test("status context：含糊回复先请改口再重发确认卡；报了 OA 单号先说明不能按号查", async (t) => {
   const stateDir = await mkdtemp(path.join(os.tmpdir(), "xa-oa-ctx-"));
   t.after(() => rm(stateDir, { recursive: true, force: true }));

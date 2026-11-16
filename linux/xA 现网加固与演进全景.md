@@ -344,7 +344,7 @@ flowchart TD
 
 三张表、状态机、回收见 [OA_tool/OA Workflow Bridge 接入手册.md](OA_tool/OA%20Workflow%20Bridge%20接入手册.md) 第 2 节。
 
-记住四条：`oa_ticket` 一张确认单一行、永久留台账（按内部工单号幂等，不是冷却）；`active_sender` 唯一约束保证同一人全局一张待确认；`oa_identity` 只缓存身份；`SUBMITTED` / 取消 / 过期后清掉描述与附件清单，只留单号和状态。两个 Gateway 连同一个库会双写 OA。
+记住四条：`oa_ticket` 一张确认单一行、永久留台账（按内部工单号幂等，不是冷却）；`active_sender` 唯一约束保证同一人全局一张待确认；`oa_identity` 只缓存身份；`SUBMITTED` / 取消 / 过期后清掉描述与附件清单，只留单号、类型、系统、地点和状态。两个 Gateway 连同一个库会双写 OA。
 
 台账按插件生成的 `IT-YYYYMMDD-HHMMSS-XXXX` 点查，永久留下。它防的是**同一张号**再打 Ecology：模型幻觉多调一次确认、员工说「再提交」但复用旧确认号、`unknown` 后又拿同一号 prepare。拦不住「下一句开一张新号」——那要靠规则不要乱 prepare；同人同时只能有一张待确认靠 `active_sender`（企微把正文和附件拆成两条时，两轮会各生成一个号，只查同号不够）。不要理解成「刚交完短时间不能再交」。
 
