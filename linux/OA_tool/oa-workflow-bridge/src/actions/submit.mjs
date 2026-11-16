@@ -2,7 +2,7 @@ import { encodeStagedAttachments, limitExceeded } from "../attachments.mjs";
 import { clearInboxItems, moveInboxToTicket } from "../inbox.mjs";
 import { buildCreatePayload, pendingFaultLocation, sanitizeSupplement } from "../mapping.mjs";
 import { inactiveCard, reconcileCard, submittedCard } from "../reply.mjs";
-import { expireTicket, getTicket, isActiveTicket, removeStagingDirectory, updateTicket, withStateLock } from "../store.mjs";
+import { expireTicket, getTicket, isActiveTicket, removeStagingDirectory, updateTicket, withSenderLock } from "../store.mjs";
 import { belongsTo, captureToolMedia, fail, handlerNamesOf, ignoreErrors, isExpired, isSameSession, maybeCleanup } from "./common.mjs";
 
 /** 同进程里正在提交的确认单：并发的第二次确认等第一次的结果，不再打 OA。 */
@@ -30,7 +30,7 @@ function outcomeForClosedTicket(ticket, trust) {
 async function claimForSubmit(env) {
   const { store, stateDir, config, trust, params } = env;
   const { confirmationId } = params;
-  return withStateLock(store, async () => {
+  return withSenderLock(trust.identity, async () => {
     let inbox = null;
     const ticket = await getTicket(store, confirmationId);
     if (!isActiveTicket(ticket)) return { outcome: ticket };
@@ -102,7 +102,7 @@ async function createInOa({ store, stateDir, logger, deps, config, params }, tic
     });
   } catch (error) {
     // 资料 / 附件没备齐，没调 OA：退回待确认，员工可以再确认或取消。
-    await withStateLock(store, () => updateTicket(store, confirmationId, {
+    await withSenderLock(ticket.identity, () => updateTicket(store, confirmationId, {
       status: "awaiting_confirmation",
       expectStatus: "submitting",
     }));
@@ -118,7 +118,7 @@ async function createInOa({ store, stateDir, logger, deps, config, params }, tic
     logger?.warn?.(`[oa-workflow-bridge] OA submission failed with safe code ${error?.code || "UNKNOWN"}`);
     // 结果不明 → unknown，留单人工对账；OA 明确拒绝 → failed，结束本单（可换新单重报）。两者都不自动重试。
     const status = error?.ambiguous ? "unknown" : "failed";
-    await withStateLock(store, () => updateTicket(store, confirmationId, { status, errorCode: error?.code || "OA_ERROR" }));
+    await withSenderLock(ticket.identity, () => updateTicket(store, confirmationId, { status, errorCode: error?.code || "OA_ERROR" }));
     if (status === "failed") {
       await ignoreErrors(removeStagingDirectory(stateDir, confirmationId));
       await maybeCleanup(store, stateDir);
@@ -135,11 +135,11 @@ async function createInOa({ store, stateDir, logger, deps, config, params }, tic
   };
   const handlerNames = handlerNamesOf(ticket);
   try {
-    await withStateLock(store, () => updateTicket(store, confirmationId, { status: "submitted", requestId: created.requestId }));
+    await withSenderLock(ticket.identity, () => updateTicket(store, confirmationId, { status: "submitted", requestId: created.requestId }));
   } catch (error) {
     // OA 已建单但本地没记上：绝不能改判失败，标 unknown（带单号）留人工对账。
     logger?.warn?.(`[oa-workflow-bridge] OA created requestId=${created.requestId} but local persist failed: ${error?.message || error}`);
-    await ignoreErrors(withStateLock(store, () => updateTicket(store, confirmationId, {
+    await ignoreErrors(withSenderLock(ticket.identity, () => updateTicket(store, confirmationId, {
       status: "unknown",
       requestId: created.requestId,
       errorCode: "DB_UNAVAILABLE",

@@ -13,7 +13,7 @@ import {
   insertTicket,
   removeStagingDirectory,
   updateTicket,
-  withStateLock,
+  withSenderLock,
 } from "../store.mjs";
 import { captureToolMedia, fail, handlerNamesOf, ignoreErrors, isExpired, isSameSession, maybeCleanup } from "./common.mjs";
 import { submitConfirmed } from "./submit.mjs";
@@ -94,7 +94,7 @@ export async function prepare(env) {
   let expiredNotice = false;
   let committed = false;
   try {
-    await withStateLock(store, async () => {
+    await withSenderLock(trust.identity, async () => {
       const { inbox, notices } = await captureToolMedia(env);
       expiredNotice = notices.expired;
       if (notices.rejected) throw limitExceeded();
