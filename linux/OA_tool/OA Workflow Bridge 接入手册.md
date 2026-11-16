@@ -173,7 +173,7 @@ AGENTS.md 规则零条命中、但确实是 IT 方面的事时，模型不传 `t
 | `OA_MAX_ATTACHMENT_BYTES` / `OA_MAX_TOTAL_ATTACHMENT_BYTES` | 10MB / 25MB |
 | `OA_IDENTITY_ADAPTER` | `on`；`off` 时 `prepare` 回 `OA_IDENTITY_MAPPING_REQUIRED` |
 
-旧部署挂进来的 `bridge-config.json` 仍会逐项兜底读取，同名环境变量优先；迁移见运维手册第 12 节。
+插件不再读任何配置文件。旧部署（`bridge-config.json` + secret 文件）换成新方式，见运维手册第 12 节：全新起一套再切换，只沿用凭据。
 
 另外 `OPENCLAW_STATE_DIR` 决定 staging 目录（compose 已设）。`openclaw.json` 侧：`plugins.allow` 与 `entries` 只用 id `oa-workflow-bridge`（旧 id `oa-workflow-bridge-redis`、`wecom-oa-identity-adapter` 删干净），`load.paths` 为 `/opt/xa/oa-workflow-bridge`，两处 `alsoAllow` 含 `oa_workflow`。
 

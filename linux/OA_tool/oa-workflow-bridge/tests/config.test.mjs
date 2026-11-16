@@ -17,7 +17,7 @@ const PUBLIC_KEY = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA" + "A".repeat(3
 const BASE_ENV = { ...MYSQL_ENV, OA_APP_ID: "2026-09-01-test", OA_PUBLIC_KEY: PUBLIC_KEY };
 
 test("只填必需的环境变量时，其余用默认值：不建单、不自动流转、流程 602", async () => {
-  const config = await loadBridgeConfig({ env: BASE_ENV, legacy: {} });
+  const config = await loadBridgeConfig({ env: BASE_ENV });
   assert.equal(config.active, false);
   assert.equal(config.isnextflow, "0");
   assert.equal(config.baseUrl, "https://adtekoa.com");
@@ -34,7 +34,6 @@ test("只填必需的环境变量时，其余用默认值：不建单、不自�
 test("环境变量可以打开建单、自动流转，也能覆盖固定项", async () => {
   const config = await loadBridgeConfig({
     env: { ...BASE_ENV, OA_ACTIVE: "true", OA_ISNEXTFLOW: "1", OA_INBOX_TTL_MINUTES: "45", OA_IDENTITY_ADAPTER: "OFF" },
-    legacy: {},
   });
   assert.equal(config.active, true);
   assert.equal(config.isnextflow, "1");
@@ -42,45 +41,28 @@ test("环境变量可以打开建单、自动流转，也能覆盖固定项", as
   assert.equal(config.identity.adapter, "off");
 });
 
-test("旧部署的 bridge-config.json 逐项兜底，同名环境变量优先", async () => {
-  const legacy = {
-    active: true, appId: "legacy-app", publicKeySpkiBase64: PUBLIC_KEY, isnextflow: "1",
-    mysql: { host: "old-host", user: "old_user", database: "old_db" },
-  };
-  const fromFile = await loadBridgeConfig({ env: {}, legacy });
-  assert.equal(fromFile.active, true);
-  assert.equal(fromFile.appId, "legacy-app");
-  assert.equal(fromFile.isnextflow, "1");
-  assert.equal(fromFile.mysql.host, "old-host");
-  const overridden = await loadBridgeConfig({ env: { OA_ACTIVE: "false", OA_APP_ID: "new-app" }, legacy });
-  assert.equal(overridden.active, false);
-  assert.equal(overridden.appId, "new-app");
-});
-
 test("必填项缺失或取值非法时拒绝加载", async () => {
-  await assert.rejects(loadBridgeConfig({ env: { ...BASE_ENV, OA_APP_ID: "" }, legacy: {} }), /OA_APP_ID is missing/);
-  await assert.rejects(loadBridgeConfig({ env: { ...BASE_ENV, OA_PUBLIC_KEY: "" }, legacy: {} }), /OA_PUBLIC_KEY is missing/);
-  await assert.rejects(loadBridgeConfig({ env: { ...BASE_ENV, OA_ACTIVE: "maybe" }, legacy: {} }), /OA_ACTIVE must be true or false/);
-  await assert.rejects(loadBridgeConfig({ env: { ...BASE_ENV, OA_ISNEXTFLOW: "2" }, legacy: {} }), /isnextflow must be "0" or "1"/);
-  await assert.rejects(loadBridgeConfig({ env: { ...BASE_ENV, OA_BASE_URL: "https://evil.example" }, legacy: {} }), /adtekoa\.com/);
-  await assert.rejects(loadBridgeConfig({ env: { ...BASE_ENV, OA_IDENTITY_ADAPTER: "auto" }, legacy: {} }), /OA_IDENTITY_ADAPTER/);
+  await assert.rejects(loadBridgeConfig({ env: { ...BASE_ENV, OA_APP_ID: "" } }), /OA_APP_ID is missing/);
+  await assert.rejects(loadBridgeConfig({ env: { ...BASE_ENV, OA_PUBLIC_KEY: "" } }), /OA_PUBLIC_KEY is missing/);
+  await assert.rejects(loadBridgeConfig({ env: { ...BASE_ENV, OA_ACTIVE: "maybe" } }), /OA_ACTIVE must be true or false/);
+  await assert.rejects(loadBridgeConfig({ env: { ...BASE_ENV, OA_ISNEXTFLOW: "2" } }), /isnextflow must be "0" or "1"/);
+  await assert.rejects(loadBridgeConfig({ env: { ...BASE_ENV, OA_BASE_URL: "https://evil.example" } }), /adtekoa\.com/);
+  await assert.rejects(loadBridgeConfig({ env: { ...BASE_ENV, OA_IDENTITY_ADAPTER: "auto" } }), /OA_IDENTITY_ADAPTER/);
 });
 
-test("MySQL 连接参数：环境变量优先，逐项回退到旧 bridge-config.json 的 mysql 段", () => {
-  const legacy = { mysql: { host: "old-host", port: 3307, user: "old_user", database: "old_db" } };
-  assert.deepEqual(loadMysqlConfig(legacy, {}), { host: "old-host", port: 3307, user: "old_user", database: "old_db" });
+test("MySQL 连接参数来自环境变量，端口默认 3306，前后空白会去掉", () => {
   assert.deepEqual(
-    loadMysqlConfig(legacy, { OA_MYSQL_HOST: " new-host ", OA_MYSQL_PORT: "3308" }),
-    { host: "new-host", port: 3308, user: "old_user", database: "old_db" },
+    loadMysqlConfig({ ...MYSQL_ENV, OA_MYSQL_HOST: " db.internal " }),
+    { host: "db.internal", port: 3306, user: "xa_oa", database: "xa_oa" },
   );
-  assert.equal(loadMysqlConfig({}, MYSQL_ENV).port, 3306);
+  assert.equal(loadMysqlConfig({ ...MYSQL_ENV, OA_MYSQL_PORT: "3307" }).port, 3307);
 });
 
 test("MySQL 连接参数缺失或非法时拒绝加载", () => {
-  assert.throws(() => loadMysqlConfig({}, {}), /OA_MYSQL_HOST is required/);
-  assert.throws(() => loadMysqlConfig({}, { ...MYSQL_ENV, OA_MYSQL_USER: "" }), /OA_MYSQL_USER is required/);
-  assert.throws(() => loadMysqlConfig({}, { ...MYSQL_ENV, OA_MYSQL_DATABASE: "xa-oa;drop" }), /OA_MYSQL_DATABASE is required/);
-  assert.throws(() => loadMysqlConfig({}, { ...MYSQL_ENV, OA_MYSQL_PORT: "abc" }), /OA_MYSQL_PORT must be a positive integer/);
+  assert.throws(() => loadMysqlConfig({}), /OA_MYSQL_HOST is required/);
+  assert.throws(() => loadMysqlConfig({ ...MYSQL_ENV, OA_MYSQL_USER: "" }), /OA_MYSQL_USER is required/);
+  assert.throws(() => loadMysqlConfig({ ...MYSQL_ENV, OA_MYSQL_DATABASE: "xa-oa;drop" }), /OA_MYSQL_DATABASE is required/);
+  assert.throws(() => loadMysqlConfig({ ...MYSQL_ENV, OA_MYSQL_PORT: "abc" }), /OA_MYSQL_PORT must be a positive integer/);
 });
 
 test("systems.json 校验：选项 ID 唯一、处理人是数字串、类型必须是三类之一", () => {

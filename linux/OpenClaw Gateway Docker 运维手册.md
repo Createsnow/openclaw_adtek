@@ -258,75 +258,129 @@ UPDATE xa_oa.oa_ticket
 - `.env` 不进 git；机器上除了运维还有别人能登录时 `chmod 600 ~/xa/.env`。docker 组只给运维（能跑 docker 就能 `docker inspect` 看到环境变量）。`docker port xa-gateway` 应只绑 `127.0.0.1`。
 - 测试环境只用测试机器人，不放生产 BotSecret。
 
-## 12. 旧部署迁到 `.env`（一次性）
+## 12. 换成新部署方式：全新起一套再切换
 
-2026-11 之前装的环境用的是 `~/xa/secrets/*.txt` + `entrypoint.sh`。迁移只换配置来源和运行身份，`openclaw.json`、工作区、MySQL 数据都不动。约 10 分钟，期间机器人不回消息。
+2026-11 之前装的环境用 `secrets/*.txt` + `entrypoint.sh` + `oa-bridge-config.json`。不在原目录上改，也不搬旧数据：在新目录、新库上全新装一套，**只从旧部署拿凭据**。验收通过后在停机窗口切过去，旧目录和旧库原样留着做历史和回滚。
 
-1. 拉新仓库，按安装手册第 5 节**重新构建镜像**（新 Dockerfile 才允许任意 uid 运行）。
-2. 把 secret 文件转成 `.env`（在 `~/xa` 下执行；secret 文件属主是 1000，所以用 sudo 读）：
+| 事项 | 新的一套 |
+| --- | --- |
+| 目录 | 新目录 `~/xa-new`，切换时改名成 `~/xa` |
+| 数据库 | DBA 新建一个空库（如 `xa_oa2`）和账号，从验收开始就连它。旧库 `xa_oa` 不动、不再连 |
+| 配置、会话、附件暂存、企微插件 | 全部新生成，不拷旧 `config/`（企微插件首次启动会自动装） |
+| 凭据 | 用下面的脚本从旧目录取，或找管理员重新要 |
+| 企微机器人 | 同一个机器人不能两套同时连：验收用**测试机器人**，切换时才换成生产机器人 |
+
+代价：旧库里还没确认的单不会带过来，员工要重新报；会话上下文从零开始。工单台账以 OA 为准，旧库留着可查。
+
+### 12.1 装新的一套并验收（不停机）
+
+1. 给旧镜像留一个回滚标签，再按安装手册第 5 节构建新镜像：
 
    ```bash
-   cd ~/xa && XA_UID=$(id -u) XA_GID=$(id -g) sudo -E python3 - <<'EOF'
-   import json, os, pathlib
+   docker tag xa-gateway-oa:2026.9.2 xa-gateway-oa:before-env
+   ```
+
+2. 按安装手册第 3 节让 DBA 建新库和账号（库名换成 `xa_oa2`）。
+3. 在 `~/xa-new` 按安装手册第 2 节建目录、拷文件（命令里的 `~/xa` 换成 `~/xa-new`），然后从旧部署取凭据写进 `.env`（旧 secret 文件属主是 1000，所以用 sudo 读）：
+
+   ```bash
+   sudo env OLD="$HOME/xa" NEW="$HOME/xa-new" XA_UID=$(id -u) XA_GID=$(id -g) python3 - <<'EOF'
+   import json, os, pathlib, re
+   old, new = pathlib.Path(os.environ["OLD"]), pathlib.Path(os.environ["NEW"])
    names = {
        "gateway_token": "OPENCLAW_GATEWAY_TOKEN",
        "wecom_bot_id": "XA_IT_WECOM_BOT_ID", "wecom_bot_secret": "XA_IT_WECOM_BOT_SECRET",
        "model_api_key": "XA_DOMESTIC_API_KEY", "model_base_url": "XA_DOMESTIC_BASE_URL", "model_id": "XA_DOMESTIC_MODEL_ID",
-       "oa_mysql_password": "OA_MYSQL_PASSWORD", "oa_api_user_id": "OA_API_USER_ID", "oa_app_secret": "OA_APP_SECRET",
+       "oa_api_user_id": "OA_API_USER_ID", "oa_app_secret": "OA_APP_SECRET",
        "wecom_identity_corpid": "WECOM_IDENTITY_CORPID", "wecom_identity_secret": "WECOM_IDENTITY_SECRET",
    }
-   lines = [f"XA_UID={os.environ['XA_UID']}", f"XA_GID={os.environ['XA_GID']}"]
-   for file, var in names.items():
-       value = pathlib.Path(f"secrets/{file}.txt").read_text().strip()
+   values = {var: (old / "secrets" / f"{file}.txt").read_text().strip() for file, var in names.items()}
+   cfg = json.loads((old / "oa-bridge-config.json").read_text())
+   values["OA_APP_ID"] = cfg.get("appId", "")
+   values["OA_PUBLIC_KEY"] = cfg.get("publicKeySpkiBase64", "")
+   values["XA_UID"], values["XA_GID"] = os.environ["XA_UID"], os.environ["XA_GID"]
+   env = new / ".env"
+   text = env.read_text()
+   for var, value in values.items():
        if "'" in value:
-           raise SystemExit(f"{file}.txt 含单引号，请手工写进 .env")
-       lines.append(f"{var}='{value}'")
-   # 旧 oa-bridge-config.json 里的配置也搬过来（流程号、时长等若和默认值一样就不用搬）
-   cfg = json.loads(pathlib.Path("oa-bridge-config.json").read_text())
-   mysql = cfg.get("mysql", {})
-   moved = {
-       "OA_APP_ID": cfg.get("appId"), "OA_PUBLIC_KEY": cfg.get("publicKeySpkiBase64"),
-       "OA_ACTIVE": str(cfg.get("active") is True).lower(), "OA_ISNEXTFLOW": cfg.get("isnextflow"),
-       "OA_IDENTITY_ADAPTER": (cfg.get("identity") or {}).get("adapter"),
-       "OA_MYSQL_HOST": mysql.get("host"), "OA_MYSQL_PORT": mysql.get("port"),
-       "OA_MYSQL_USER": mysql.get("user"), "OA_MYSQL_DATABASE": mysql.get("database"),
-   }
-   for var, value in moved.items():
-       if value not in (None, ""):
-           lines.append(f"{var}='{value}'")
-   defaults = {"workflowId": 602, "attachmentFieldName": "scfj", "pendingTtlHours": 24, "inboxTtlMinutes": 30,
-               "maxAttachmentBytes": 10485760, "maxTotalAttachmentBytes": 26214400}
-   for key, value in defaults.items():
-       if key in cfg and cfg[key] != value:
-           print(f"注意：{key}={cfg[key]} 和默认值不同，请手工加到 .env（变量名见 OA 接入手册第 4 节）")
-   env = pathlib.Path(".env")
-   env.write_text("\n".join(lines) + "\n")
+           raise SystemExit(f"{var} 的值含单引号，请手工写进 .env")
+       text = re.sub(rf"^{var}=.*$", lambda _: f"{var}='{value}'", text, flags=re.M)
+   env.write_text(text)
    os.chown(env, int(os.environ["XA_UID"]), int(os.environ["XA_GID"]))
    os.chmod(env, 0o600)
-   print("写好 .env：", len(lines) - 2, "项配置")
+   print("凭据已写入", env, "。还要手填：OA_MYSQL_*（新库）、机器人改成测试机器人")
    EOF
    ```
 
-   `model_ref.txt` 不再需要（compose 自动拼 `bailian/<模型 ID>`）。`oa-bridge-config.json` 里的 appId、公钥、建单开关、流转开关、数据库连接一并搬进 `.env`；新 compose 不再挂这个文件。
-3. 换 compose，停旧容器，文件属主改成自己（只此一次）：
+   然后手工改 `.env`：`OA_MYSQL_HOST` / `OA_MYSQL_DATABASE`（`xa_oa2`）/ `OA_MYSQL_USER` / `OA_MYSQL_PASSWORD` 填新库；`XA_IT_WECOM_BOT_ID` / `XA_IT_WECOM_BOT_SECRET` 先换成**测试机器人**；`OA_ACTIVE=false`。
+4. 按安装手册第 6 节生成 `openclaw.json`。
+5. 现网还占着容器名 `xa-gateway` 和端口 18789，新的一套先错开。在 `~/xa-new` 下建 `docker-compose.override.yml`（compose 会自动叠加）：
+
+   ```yaml
+   # 并行验收期间用，切换时删掉
+   services:
+     xa-gateway:
+       container_name: xa-gateway-new
+       ports: !override ["127.0.0.1:18799:18789"]
+   ```
+
+6. `cd ~/xa-new && docker compose up -d`，按安装手册第 7～9 节验收（第 8 节写企微通道时用的就是 `.env` 里的测试机器人）。CLI 用 `docker exec -it xa-gateway-new node dist/index.js …`，控制台走 18799。
+
+### 12.2 切换（停机约 5 分钟，挑没人用的时间）
+
+1. 先在**旧库**查未结的单：
+
+   ```sql
+   SELECT status, COUNT(*) FROM xa_oa.oa_ticket
+    WHERE status IN ('awaiting_confirmation', 'submitting', 'unknown') GROUP BY status;
+   ```
+
+   `submitting` / `unknown` 必须先按第 10 节对账完再切（否则 OA 里有没有这张单就没人知道了）。`awaiting_confirmation` 切换后作废，员工重新报即可。
+2. 清掉验收留下的测试单（只动新库）：
+
+   ```sql
+   TRUNCATE TABLE xa_oa2.oa_ticket; TRUNCATE TABLE xa_oa2.oa_inbox; TRUNCATE TABLE xa_oa2.oa_identity;
+   ```
+
+3. 两套都停，目录对调：
 
    ```bash
-   cd ~/xa && docker compose down && cp docker-compose.yml docker-compose.yml.old
+   cd ~/xa-new && docker compose down
    ```
 
    ```bash
-   cp ~/handoff/xa/docker/docker-compose.yml ~/xa/
+   cd ~/xa && docker compose down
    ```
 
    ```bash
-   sudo chown -R $(id -u):$(id -g) ~/xa
+   mv ~/xa ~/xa-old && mv ~/xa-new ~/xa && rm ~/xa/docker-compose.override.yml
    ```
 
-4. 启动并验证：`docker compose up -d`，然后跑第 2 节健康检查和 OA 只读预检，测试机器人发一条消息。
-5. 都正常后删旧文件：
+4. 把 `~/xa/.env` 的 `XA_IT_WECOM_BOT_ID` / `XA_IT_WECOM_BOT_SECRET` 换成**生产机器人**（旧目录 `~/xa-old/secrets/wecom_bot_*.txt` 里的值），`OA_ACTIVE` / `OA_ISNEXTFLOW` 设成现网要的值（旧 `~/xa-old/oa-bridge-config.json` 里的 `active` / `isnextflow`）。
+5. 启动并验证：`cd ~/xa && docker compose up -d`，跑第 2 节健康检查和 OA 只读预检，用测试号私聊生产机器人报一次修再取消。
 
-   ```bash
-   rm -rf ~/xa/secrets ~/xa/entrypoint.sh ~/xa/docker-compose.yml.old ~/xa/oa-bridge-config.json
-   ```
+inbound 清理 cron 写的是 `$HOME/xa/...`，目录对调后不用改。
 
-回滚（第 5 步之前）：`docker compose down`，`mv docker-compose.yml.old docker-compose.yml`，`sudo chown -R 1000:1000 ~/xa`，`docker compose up -d`。旧 compose 用的镜像 tag 如果被新构建覆盖了，旧 compose 也能用新镜像跑（以 uid 1000 运行）。
+### 12.3 回滚与收尾
+
+回滚（切换后发现问题）：
+
+```bash
+cd ~/xa && docker compose down
+```
+
+```bash
+mv ~/xa ~/xa-new && mv ~/xa-old ~/xa
+```
+
+```bash
+cd ~/xa && sed -i 's/^\(\s*image:\).*/\1 xa-gateway-oa:before-env/' docker-compose.yml && docker compose up -d
+```
+
+回滚后旧部署连的还是旧库；切换后在新部署里提交的单只在新库，OA 里照常存在。
+
+观察一两周没问题，删掉回滚镜像。旧目录和旧库作为历史留档（使用统计 `docs/小A使用情况.md` 的数据就在旧目录里），确认不再需要后再删：
+
+```bash
+docker rmi xa-gateway-oa:before-env
+```
