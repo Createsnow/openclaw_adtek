@@ -11,7 +11,7 @@ import {
 } from "./attachments.mjs";
 import { resolveInboxTtlMs } from "./config.mjs";
 import { attachmentIdentityKeys, senderIdOf } from "./inbound-media.mjs";
-import { deleteInbox, inboxDirName, readInbox, stagingPaths, withStateLock, writeInbox } from "./store.mjs";
+import { deleteInbox, inboxDirName, readInbox, stagingPaths, withSenderLock, writeInbox } from "./store.mjs";
 import { identityCode, sessionCodes } from "./trust.mjs";
 
 /**
@@ -39,7 +39,7 @@ export async function captureInbound({ store, stateDir, config, source, attachme
   const codes = sessionCodes(source);
   if (!sender || (!codes.id && !codes.key)) return null;
   const identity = identityCode(sender);
-  return withStateLock(store, async () => {
+  return withSenderLock(identity, async () => {
     let inbox = await readInbox(store, identity);
     let changed = false;
     let expiredNotice = false;

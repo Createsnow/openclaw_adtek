@@ -4,7 +4,7 @@ import { access, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { discardUnpreparedInbox, getActiveTicket, getTicket, inboxDirName, readInbox, stagingPaths, withStateLock } from "../src/store.mjs";
+import { discardUnpreparedInbox, getActiveTicket, getTicket, inboxDirName, readInbox, stagingPaths, withSenderLock } from "../src/store.mjs";
 import { createTestStore, expireNow, hookCapture } from "./helpers.mjs";
 import { createOAWorkflowToolFactory } from "../src/tool.mjs";
 
@@ -532,7 +532,7 @@ test("discardUnpreparedInbox 必须等 inbox 写入锁结束，不能并行清�
   const stateStore = createTestStore();
   const order = [];
   await Promise.all([
-    withStateLock(stateStore, async () => {
+    withSenderLock(ownerOf("wecom-user-1").identity, async () => {
       order.push("writer-start");
       await new Promise((resolve) => setTimeout(resolve, 30));
       order.push("writer-end");

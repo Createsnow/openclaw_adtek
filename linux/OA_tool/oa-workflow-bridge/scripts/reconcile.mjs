@@ -4,7 +4,7 @@
  *   node scripts/reconcile.mjs                    导出小A成功提交的 OA 单号（CSV）
  *   node scripts/reconcile.mjs --oa oa-export.csv 与 OA 导出的单号清单比对
  * OA 导出文件：CSV / 纯文本均可，取每行里第一串 4 位以上的数字当 requestId。
- * 需要 OA_MYSQL_PASSWORD；连接参数取自 bridge-config.json。
+ * 数据库连接取自环境变量 OA_MYSQL_*（容器里已注入）。
  */
 import { readFile } from "node:fs/promises";
 import { loadBridgeConfig } from "../src/config.mjs";

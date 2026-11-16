@@ -78,7 +78,7 @@ export async function createMysqlDb(mysqlConfig, { password = process.env.OA_MYS
     password: String(password).trim(),
     database: mysqlConfig.database,
     charset: "utf8mb4",
-    connectionLimit: 4,
+    connectionLimit: 10,
     connectTimeout: 10_000,
     enableKeepAlive: true,
   });

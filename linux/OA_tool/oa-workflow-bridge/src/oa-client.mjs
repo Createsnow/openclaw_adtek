@@ -12,7 +12,7 @@ export class OAClientError extends Error {
   }
 }
 
-/** OA 凭据只从环境变量读：OA_API_USER_ID / OA_APP_SECRET（compose secret → entrypoint 注入）。 */
+/** OA 凭据只从环境变量读：OA_API_USER_ID / OA_APP_SECRET（compose 从 .env 注入）。 */
 export function readOaCredentials(env = process.env) {
   return {
     apiUserId: String(env.OA_API_USER_ID || "").trim(),

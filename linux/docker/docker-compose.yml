@@ -3,7 +3,8 @@ services:
     # 自建镜像：官方 OpenClaw 2026.9.2 + OA 桥接插件与依赖，构建见 docker/Dockerfile
     image: xa-gateway-oa:2026.9.2
     container_name: xa-gateway
-    user: "1000:1000"
+    # 以宿主机当前用户身份运行，~/xa 下的文件不用 chown。XA_UID / XA_GID 写在 .env（id -u / id -g）
+    user: "${XA_UID:-1000}:${XA_GID:-1000}"
     restart: unless-stopped
     logging:
       driver: json-file
@@ -15,31 +16,46 @@ services:
       HOME: /home/node
       OPENCLAW_GATEWAY_BIND: lan
       OPENCLAW_STATE_DIR: /home/node/.openclaw
-    secrets:
-      - gateway_token
-      - wecom_bot_id
-      - wecom_bot_secret
-      - model_api_key
-      - model_base_url
-      - model_id
-      - model_ref
-      - oa_mysql_password
-      - oa_api_user_id
-      - oa_app_secret
-      - wecom_identity_corpid
-      - wecom_identity_secret
+      # 全部配置来自同目录的 .env（模板 docker/.env.example）。必填项缺了，docker compose 直接报错，不会带空值启动
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:?.env 缺 OPENCLAW_GATEWAY_TOKEN}
+      XA_IT_WECOM_BOT_ID: ${XA_IT_WECOM_BOT_ID:?.env 缺 XA_IT_WECOM_BOT_ID}
+      XA_IT_WECOM_BOT_SECRET: ${XA_IT_WECOM_BOT_SECRET:?.env 缺 XA_IT_WECOM_BOT_SECRET}
+      XA_DOMESTIC_API_KEY: ${XA_DOMESTIC_API_KEY:?.env 缺 XA_DOMESTIC_API_KEY}
+      XA_DOMESTIC_BASE_URL: ${XA_DOMESTIC_BASE_URL:?.env 缺 XA_DOMESTIC_BASE_URL}
+      XA_DOMESTIC_MODEL_ID: ${XA_DOMESTIC_MODEL_ID:?.env 缺 XA_DOMESTIC_MODEL_ID}
+      # Provider 键固定 bailian，完整引用由模型 ID 拼出来，不用另填
+      XA_DOMESTIC_MODEL_REF: bailian/${XA_DOMESTIC_MODEL_ID}
+      OA_MYSQL_HOST: ${OA_MYSQL_HOST:?.env 缺 OA_MYSQL_HOST}
+      OA_MYSQL_PORT: ${OA_MYSQL_PORT:-3306}
+      OA_MYSQL_USER: ${OA_MYSQL_USER:-xa_oa}
+      OA_MYSQL_DATABASE: ${OA_MYSQL_DATABASE:-xa_oa}
+      OA_MYSQL_PASSWORD: ${OA_MYSQL_PASSWORD:?.env 缺 OA_MYSQL_PASSWORD}
+      OA_API_USER_ID: ${OA_API_USER_ID:?.env 缺 OA_API_USER_ID}
+      OA_APP_ID: ${OA_APP_ID:?.env 缺 OA_APP_ID}
+      OA_PUBLIC_KEY: ${OA_PUBLIC_KEY:?.env 缺 OA_PUBLIC_KEY}
+      OA_ACTIVE: ${OA_ACTIVE:-false}
+      OA_ISNEXTFLOW: ${OA_ISNEXTFLOW:-0}
+      OA_IDENTITY_ADAPTER: ${OA_IDENTITY_ADAPTER:-on}
+      # 下面这些全公司固定，留空用插件默认值（https://adtekoa.com、602、scfj、24 小时、30 分钟、10MB、25MB）
+      OA_BASE_URL: ${OA_BASE_URL:-}
+      OA_WORKFLOW_ID: ${OA_WORKFLOW_ID:-}
+      OA_ATTACHMENT_FIELD: ${OA_ATTACHMENT_FIELD:-}
+      OA_PENDING_TTL_HOURS: ${OA_PENDING_TTL_HOURS:-}
+      OA_INBOX_TTL_MINUTES: ${OA_INBOX_TTL_MINUTES:-}
+      OA_MAX_ATTACHMENT_BYTES: ${OA_MAX_ATTACHMENT_BYTES:-}
+      OA_MAX_TOTAL_ATTACHMENT_BYTES: ${OA_MAX_TOTAL_ATTACHMENT_BYTES:-}
+      OA_APP_SECRET: ${OA_APP_SECRET:?.env 缺 OA_APP_SECRET}
+      WECOM_IDENTITY_CORPID: ${WECOM_IDENTITY_CORPID:?.env 缺 WECOM_IDENTITY_CORPID}
+      WECOM_IDENTITY_SECRET: ${WECOM_IDENTITY_SECRET:?.env 缺 WECOM_IDENTITY_SECRET}
     volumes:
       - ./config:/home/node/.openclaw
       - ./workspace:/home/node/.openclaw/workspace
       - ./extensions:/home/node/.openclaw/extensions
-      - ./entrypoint.sh:/entrypoint.sh:ro
-      # OA 桥接现网配置（appId、公钥、MySQL 主机等，不含密码）
-      - ./oa-bridge-config.json:/opt/xa/oa-workflow-bridge/bridge-config.json:ro
-    # 只走本机 / SSH 隧道。改 ports 后必须 down && up，只 restart 不够。
+    # 只走本机 / SSH 隧道
     ports:
       - "127.0.0.1:18789:18789"
-    init: true
-    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    # 镜像自带 tini 作为入口，这里只给启动命令
+    command: ["node", "dist/index.js", "gateway", "--bind", "lan", "--port", "18789"]
     healthcheck:
       test:
         [
@@ -50,29 +66,3 @@ services:
       timeout: 5s
       retries: 5
       start_period: 40s
-
-secrets:
-  gateway_token:
-    file: ./secrets/gateway_token.txt
-  wecom_bot_id:
-    file: ./secrets/wecom_bot_id.txt
-  wecom_bot_secret:
-    file: ./secrets/wecom_bot_secret.txt
-  model_api_key:
-    file: ./secrets/model_api_key.txt
-  model_base_url:
-    file: ./secrets/model_base_url.txt
-  model_id:
-    file: ./secrets/model_id.txt
-  model_ref:
-    file: ./secrets/model_ref.txt
-  oa_mysql_password:
-    file: ./secrets/oa_mysql_password.txt
-  oa_api_user_id:
-    file: ./secrets/oa_api_user_id.txt
-  oa_app_secret:
-    file: ./secrets/oa_app_secret.txt
-  wecom_identity_corpid:
-    file: ./secrets/wecom_identity_corpid.txt
-  wecom_identity_secret:
-    file: ./secrets/wecom_identity_secret.txt

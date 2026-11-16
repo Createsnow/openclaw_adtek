@@ -3,7 +3,7 @@ import { resolveInboxTtlMs } from "../config.mjs";
 import { attachmentReceiptHint, hintZhFor } from "../hints.mjs";
 import { clearInboxItems, moveInboxToTicket } from "../inbox.mjs";
 import { confirmCard, INBOX_EXPIRED } from "../reply.mjs";
-import { expireTicket, getActiveTicket, getTicket, isActiveTicket, updateTicket, withStateLock, writeInbox } from "../store.mjs";
+import { expireTicket, getActiveTicket, getTicket, isActiveTicket, updateTicket, withSenderLock, writeInbox } from "../store.mjs";
 import { captureToolMedia, cardFields, fail, isExpired, isSameSession, maybeCleanup } from "./common.mjs";
 
 function withExpiredNotice(notices, reply) {
@@ -18,7 +18,7 @@ function withExpiredNotice(notices, reply) {
  */
 export async function attach(env) {
   const { store, stateDir, config, trust, params } = env;
-  const result = await withStateLock(store, async () => {
+  const result = await withSenderLock(trust.identity, async () => {
     const { inbox, notices } = await captureToolMedia(env);
     if (params.confirmationId) {
       const named = await getTicket(store, params.confirmationId);
