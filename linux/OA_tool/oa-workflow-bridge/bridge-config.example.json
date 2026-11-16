@@ -10,6 +10,7 @@
   "inboxTtlMinutes": 30,
   "maxAttachmentBytes": 10485760,
   "maxTotalAttachmentBytes": 26214400,
+  "withdrawAsMonitor": false,
   "mysql": {
     "host": "replace-with-mysql-host",
     "port": 3306,

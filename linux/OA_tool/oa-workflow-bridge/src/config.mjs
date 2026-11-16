@@ -92,6 +92,8 @@ export async function loadBridgeConfig() {
     maxTotalAttachmentBytes: requirePositiveInteger(raw.maxTotalAttachmentBytes, "maxTotalAttachmentBytes"),
     mysql: loadMysqlConfig(raw),
     identity: loadIdentityConfig(raw),
+    // 撤回已提交工单：默认以申请人身份收回；true 时以接口账号 + 监控权限收回（接口账号须有该流程的监控权限）。
+    withdrawAsMonitor: raw.withdrawAsMonitor === true,
   };
   if (!/^[A-Za-z0-9._-]{2,64}$/.test(config.appId)) {
     throw new Error("Invalid OA appId");

@@ -60,6 +60,7 @@ export function closedTicketCode(ticket) {
     case "failed": return "OA_CREATE_REJECTED";
     case "cancelled": return "CANCELLED";
     case "submitted": return "ALREADY_SUBMITTED";
+    case "withdrawn": return "WITHDRAWN";
     default: return "NOT_FOUND";
   }
 }

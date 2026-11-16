@@ -16,9 +16,11 @@ export function createStore(db, { now = () => Date.now() } = {}) {
 export { ACTIVE_TICKET_STATUSES };
 const ACTIVE = new Set(ACTIVE_TICKET_STATUSES);
 /** 进入这些状态后清掉描述与附件清单，只留台账（单号、状态、时间）。 */
-const TERMINAL = new Set(["submitted", "cancelled", "expired", "failed"]);
+const TERMINAL = new Set(["submitted", "cancelled", "expired", "failed", "withdrawn"]);
 /** 查进度「最近记录」列出的状态与条数。 */
-const RECENT_STATUSES = ["submitted", "cancelled", "expired", "failed", "unknown"];
+const RECENT_STATUSES = ["submitted", "cancelled", "expired", "failed", "unknown", "withdrawn"];
+/** withdraw 不指定单号时最多列出几张可撤回的单。 */
+const WITHDRAWABLE_LIMIT = 5;
 const RECENT_LIMIT = 20;
 
 /**
@@ -102,6 +104,28 @@ export async function listRecentTickets(store, identity) {
     requestId: row.request_id || null,
     updatedAt: new Date(Number(row.updated_at)).toISOString(),
   }));
+}
+
+/** 此人在 xA 里建过、带这个 OA 单号的单（任意状态，取最近一张）。别人的单查不到。 */
+export async function getTicketByRequestId(store, identity, requestId) {
+  if (!identity || !/^\d{1,18}$/.test(String(requestId || ""))) return null;
+  const rows = await store.db.query(
+    "SELECT * FROM oa_ticket WHERE sender_code = ? AND request_id = ? ORDER BY updated_at DESC LIMIT 1",
+    [identity, String(requestId)],
+  );
+  return rowToTicket(rows[0]);
+}
+
+/** 此人已提交到 OA、还能尝试撤回的单（最近的在前，最多 WITHDRAWABLE_LIMIT 张）与总数。 */
+export async function listWithdrawableTickets(store, identity) {
+  if (!identity) return { total: 0, tickets: [] };
+  const where = "WHERE sender_code = ? AND status = 'submitted' AND request_id IS NOT NULL AND request_id <> ''";
+  const [countRow] = await store.db.query(`SELECT COUNT(*) AS n FROM oa_ticket ${where}`, [identity]);
+  const rows = await store.db.query(
+    `SELECT * FROM oa_ticket ${where} ORDER BY updated_at DESC LIMIT ${WITHDRAWABLE_LIMIT}`,
+    [identity],
+  );
+  return { total: Number(countRow?.n || 0), tickets: rows.map(rowToTicket) };
 }
 
 export async function insertTicket(store, ticket) {

@@ -26,13 +26,13 @@
                │
                ▼
          xA Agent（AGENTS.md 规则，只调 oa_workflow）
-               │ prepare / attach / submit_confirmed / status / cancel
+               │ prepare / attach / submit_confirmed / status / cancel / withdraw
                ▼
          oa-workflow-bridge
            ├── src/identity/   企微 user/get → 工号 → getHrmUserInfoWithPage → OA 人员 id
            ├── MySQL           oa_ticket / oa_inbox / oa_identity
            ├── 本机 staging     {OPENCLAW_STATE_DIR}/oa-workflow-bridge/staging/
-           └── Ecology         applytoken → getHrmSimpleInfo → doCreateRequest（流程 602）
+           └── Ecology         applytoken → getHrmSimpleInfo → doCreateRequest（流程 602）；撤回走 doForceDrawBack
 ```
 
 模型只整理文字事实（类型、系统、摘要、描述）；插件负责身份、确认态、幂等、附件、处理人、建单。模型不传人员 id、OA 字段名、流程 id、内部工单号。
@@ -45,7 +45,7 @@
 | --- | --- |
 | `index.mjs` | 插件入口：连库建表、注册工具、hook 收附件、`/new` / `session_end` 清 inbox、每 10 分钟到期回收 |
 | `src/tool.mjs` | 工具 schema、分发、错误码归一；每个回执补 `replyZh` |
-| `src/actions/*.mjs` | 五个 action，各一个文件；`common.mjs` 放共用的判定与回执字段 |
+| `src/actions/*.mjs` | 六个 action，各一个文件；`common.mjs` 放共用的判定与回执字段 |
 | `src/reply.mjs` | 员工可见卡片（确认卡、成功卡、另一对话的待确认单、人工核对、取消……） |
 | `src/inbox.mjs` | 附件一出现就落进 inbox（拷进 staging + 入库）、搬进工单 |
 | `src/store.mjs` | 三张表的读写、进程锁、staging 路径、到期回收 |
@@ -86,10 +86,12 @@ prepare ──► awaiting_confirmation ──submit──► submitting ──O
                  │                                └── 结果不明 ──────► unknown（人工对账）
                  ├── cancel ──► cancelled
                  └── 满 24 小时 ──► expired
+
+submitted ──withdraw（OA 强制收回成功）──► withdrawn
 ```
 
 - 占「同一人全局一张待确认」名额的状态：`awaiting_confirmation`、`submitting`、`unknown`。此时 `active_sender = sender_code`，唯一索引在库层面保证一人一张；其余状态 `active_sender = NULL`。
-- 进入 `submitted` / `cancelled` / `expired` / `failed` 时清空描述与附件清单（员工资料随之删除），保留单号、状态、时间供对账。
+- 进入 `submitted` / `cancelled` / `expired` / `failed` / `withdrawn` 时清空描述与附件清单（员工资料随之删除），保留单号、状态、时间供对账。
 - 同一内部幂等号（`external_ticket_id`）可能有多行：取消 / 过期后同一条消息可再 prepare。幂等判断看最新一行：`submitted` → `ALREADY_SUBMITTED`；`submitting` / `unknown` → `RECONCILIATION_REQUIRED`；仍有效的待确认 → 由新单替换。
 
 ### 2.3 到期回收
@@ -231,7 +233,8 @@ docker build -f docker/Dockerfile -t xa-gateway-oa:2026.9.2 .
 
 | 字段 | 说明 |
 | --- | --- |
-| `active` | `false` 时确认会回 `OA_BRIDGE_INACTIVE`，不调 OA，待确认单不动 |
+| `active` | `false` 时确认会回 `OA_BRIDGE_INACTIVE`，不调 OA，待确认单不动；撤回同样不调 OA |
+| `withdrawAsMonitor` | 可选，默认 `false`：撤回以**申请人**身份调 `doForceDrawBack`。`true`：以接口账号 + `otherParams.ismonitor=1`（监控权限）收回，接口账号须有流程 602 的监控权限。两种方式都只允许员工撤回本人经小A提交的单 |
 | `isnextflow` | 只认字符串 `"0"` / `"1"`。现网 `"0"` 不自动流转；改 `"1"` 后重启 Gateway，不改源码 |
 | `mysql.*` | 非机密连接参数。**密码不写这里**，走 `OA_MYSQL_PASSWORD` |
 | `identity.adapter` | `on`：按企微发送人自动查 OA 人员 id；`off`：不查，`prepare` 回 `OA_IDENTITY_MAPPING_REQUIRED` |
@@ -289,6 +292,7 @@ Schema `additionalProperties: false`。可信上下文必须是：`messageChanne
 | `submit_confirmed` | `active=false` 不写；否则标 `submitting`，结果写 `submitted` / `failed` / `unknown` | `getHrmSimpleInfo` → `doCreateRequest` |
 | `status` | 只在发现到期单时记 `expired` | 否 |
 | `cancel` | 记 `cancelled`，删附件 | 否 |
+| `withdraw` | OA 收回成功才记 `withdrawn`；失败不改 | `doForceDrawBack` |
 
 ### 7.1 `prepare`
 
@@ -331,6 +335,32 @@ Schema `additionalProperties: false`。可信上下文必须是：`messageChanne
 
 `cancel`：原发送人、跨对话也可。已到期 → `CONFIRMATION_EXPIRED`（记 `expired`）；提交中 / 待对账 → `RECONCILIATION_REQUIRED`。成功 `CANCELLED`。
 
+`status` 带 `confirmationId` 查到已撤回的单 → `WITHDRAWN`。
+
+### 7.4.1 `withdraw`（撤回已提交的工单）
+
+员工要把已经提交到 OA 的单收回时调用，走 Ecology「强制收回」`POST /api/workflow/paService/doForceDrawBack`（见《Ecology 流程创建 API 说明》第五步）。只在 `oa_ticket` 里找**本人**（`sender_code`）`status=submitted` 的单，别人的单号、没经小A提交的单号一律 `WITHDRAW_NOT_FOUND`，所以模型传错号也撤不了别人的单。
+
+| 情况 | 回执 | 写库 / 调 OA |
+| --- | --- | --- |
+| 带 `requestId`（只认 1–18 位数字，空白会去掉）且是本人已提交的单 | 走 OA | |
+| 不带 `requestId`，本人只有一张已提交的单 | 走 OA，撤那张 | |
+| 不带 `requestId`，有多张 | `WITHDRAW_CHOOSE`，列最近 5 张单号请员工回 | 否 |
+| 一张也没有 | `NOTHING_TO_WITHDRAW` | 否 |
+| 单号不是本人经小A提交的 / 不是 submitted | `WITHDRAW_NOT_FOUND` | 否 |
+| 已撤回过 | `ALREADY_WITHDRAWN` | 否 |
+| 单号不是数字 | `INVALID_REQUEST_ID` | 否 |
+| `active=false` | `OA_BRIDGE_INACTIVE`（「暂时不能撤回」） | 否 |
+| 同一张正在撤回 | `WITHDRAWING` | 否 |
+| OA `SUCCESS` | `WITHDRAWN`，`replyZh`「已撤回」卡 | 记 `withdrawn` |
+| OA `NO_PERMISSION`（多半处理人已办理 / 节点不允许收回） | `WITHDRAW_DENIED`，请联系处理人 | 不改 |
+| 结果不明（网络中断、`HTTP_5xx`、`SYSTEM_INNER_ERROR`、非 JSON） | `WITHDRAW_OUTCOME_UNKNOWN`，请稍后再说一次「撤回」 | 不改 |
+| 其它拒绝（`PARAM_ERROR`、`USER_EXCEPTION`、`HTTP_4xx`、token 失败等） | `WITHDRAW_REJECTED`，联系管理员 | 不改 |
+
+失败回执都带 `oaCode`（OA 原码）。强制收回可以安全重试，所以结果不明时不进 `unknown`，本地仍是 `submitted`，员工再说一次即可。OA 已收回但写库失败：仍回 `WITHDRAWN`，日志 `OA withdrew requestId=… but local persist failed`，台账留 `submitted`，以 OA 为准。
+
+请求：Header `userid` = RSA(申请人人员 id，取 `oa_ticket.oa_requester_id`)，Body `{"requestId": 1504371}`；`withdrawAsMonitor=true` 时 Header 为接口账号、Body 加 `"otherParams":{"ismonitor":"1"}`。OA 非 `SUCCESS` 时打 `[OA_DRAWBACK_REJECTED]`（脱敏后的 `code` / `errMsg`）。收回后流程退回申请人 OA 待办，**不会删除**，员工在 OA 里改了重提或自行删除；`scripts/reconcile.mjs` 把 `withdrawn` 单单列为 `withdrawnByEmployee`，不算异常。
+
 ### 7.5 错误码与 `hintZh`
 
 没有专门卡片时 `replyZh` = `hintZh`（`src/hints.mjs`）。`HTTP_5xx` 归人工核对，其它 `HTTP_*` 归 OA 拒绝。
@@ -345,6 +375,7 @@ Schema `additionalProperties: false`。可信上下文必须是：`messageChanne
 | 这张单已经提交过（带工单号） | `ALREADY_SUBMITTED` |
 | 底稿问题，让模型改了再试 | `DRAFT_INVALID` / `INVALID_TICKET_TYPE` / `SYSTEM_NOT_ALLOWED` / `SYSTEM_UNMAPPED` / `INVALID_LOCATION` / `LOCATION_MISMATCH` / `INVALID_DEMAND_TYPE` / `INVALID_MONTHLY_HOURS` / `SUPPLEMENT_TOO_LONG` |
 | 配置缺失，联系管理员 | `HANDLER_NOT_CONFIGURED` / `ATTACHMENT_FIELD_NOT_CONFIGURED` |
+| 撤回（`withdraw` 自带卡片） | `WITHDRAWN` / `ALREADY_WITHDRAWN` / `WITHDRAW_CHOOSE` / `NOTHING_TO_WITHDRAW` / `WITHDRAW_NOT_FOUND` / `WITHDRAW_DENIED` / `WITHDRAW_REJECTED` / `WITHDRAW_OUTCOME_UNKNOWN` / `WITHDRAWING` / `INVALID_REQUEST_ID` |
 | 其它 | `MISSING_CONFIRMATION_ID`、`STAGING_MISSING`、`SENDER_MISMATCH`、`NOT_FOUND`、`NO_NEW_ATTACHMENT`、`ATTACHMENT_LIMIT_EXCEEDED` |
 
 `DB_UNAVAILABLE`：运行时连不上库或库报错；`DB_SCHEMA_MISSING`：预检发现表不在。
@@ -359,7 +390,7 @@ Schema `additionalProperties: false`。可信上下文必须是：`messageChanne
 cd OA_tool/oa-workflow-bridge && npm install && npm test
 ```
 
-覆盖：字段映射与兜底、OA 客户端、资料现查、身份转换与缓存、五个 action（确认 / 幂等 / 并发提交 / 跨会话 / 附件追加与 inbox / 过期 / 对账态）、到期回收与孤儿目录、库层唯一约束、预检、日志脱敏、`AGENTS.md` ↔ `systems.json` 一致性。
+覆盖：字段映射与兜底、OA 客户端、资料现查、身份转换与缓存、六个 action（确认 / 幂等 / 并发提交 / 跨会话 / 附件追加与 inbox / 过期 / 对账态 / 撤回）、到期回收与孤儿目录、库层唯一约束、预检、日志脱敏、`AGENTS.md` ↔ `systems.json` 一致性。
 
 真实 MySQL 集成测试默认跳过，指向**测试库**时才跑（会清空三张表）：
 

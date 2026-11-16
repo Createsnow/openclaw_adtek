@@ -240,4 +240,40 @@ export class OAClient {
     }
     return { requestId: String(requestId) };
   }
+
+  /**
+   * 强制收回已提交的流程（doForceDrawBack）。
+   * 默认以申请人身份收回（Header userid = 申请人）；asMonitor=true 时以接口账号 + 监控权限收回（otherParams.ismonitor=1）。
+   * 收回失败可安全重试，所以只有网络中断 / 5xx / SYSTEM_INNER_ERROR 标 ambiguous，调用方据此提示「结果不确定」。
+   */
+  async forceDrawBack(requestId, { operatorUserId, asMonitor = false } = {}) {
+    const id = String(requestId ?? "").trim();
+    if (!/^\d{1,18}$/.test(id)) {
+      throw new OAClientError("OA request ID is invalid", { code: "INVALID_REQUEST_ID" });
+    }
+    const headerUserId = asMonitor ? undefined : String(operatorUserId || "").trim();
+    if (!asMonitor && !/^\d{1,18}$/.test(headerUserId)) {
+      throw new OAClientError("OA operator user ID is invalid", { code: "INVALID_CONFIGURATION" });
+    }
+    const body = { requestId: Number.isSafeInteger(Number(id)) ? Number(id) : id };
+    if (asMonitor) body.otherParams = { ismonitor: "1" };
+    const result = await this.authenticatedRequest("/api/workflow/paService/doForceDrawBack", {
+      body,
+      ambiguousOnServerError: true,
+      headerUserId,
+    });
+    if (result?.code !== "SUCCESS") {
+      const code = typeof result?.code === "string" && result.code ? result.code : "OA_DRAWBACK_REJECTED";
+      console.log(`[OA_DRAWBACK_REJECTED] ${JSON.stringify(redactPayload({
+        code,
+        requestId: id,
+        errMsg: result?.errMsg ?? result?.msg ?? result?.message ?? null,
+      }))}`);
+      throw new OAClientError("OA rejected the force draw-back", {
+        code,
+        ambiguous: code === "SYSTEM_INNER_ERROR",
+      });
+    }
+    return { requestId: id };
+  }
 }

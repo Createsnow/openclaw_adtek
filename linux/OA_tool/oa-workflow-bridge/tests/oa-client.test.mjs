@@ -305,3 +305,59 @@ test("明文 OA 日志默认关闭，仅 OA_LOG_REQUEST_PLAINTEXT=1 打开", asy
     else process.env.NODE_TEST_CONTEXT = prevCtx;
   }
 });
+
+function drawBackFetch(calls, body = { code: "SUCCESS", errMsg: {} }) {
+  return async (url, options) => {
+    calls.push({ url, options });
+    if (String(url).endsWith("/applytoken")) {
+      return new Response(JSON.stringify({ status: true, code: "0", token: "token-value" }), { status: 200 });
+    }
+    return new Response(JSON.stringify(body), { status: 200 });
+  };
+}
+
+test("强制收回默认以申请人身份调 doForceDrawBack，不带 ismonitor", async () => {
+  const { privateKey, spki } = keys();
+  const calls = [];
+  const client = new OAClient({ config: config(spki), credentials: resolver, fetchImpl: drawBackFetch(calls) });
+  const result = await client.forceDrawBack("778899", { operatorUserId: "13437" });
+  assert.equal(result.requestId, "778899");
+  assert.equal(calls[1].url, "https://adtekoa.com/api/workflow/paService/doForceDrawBack");
+  assert.equal(calls[1].options.method, "POST");
+  assert.deepEqual(JSON.parse(calls[1].options.body), { requestId: 778899 });
+  assert.equal(decryptHeader(calls[1].options.headers.userid, privateKey), "13437");
+});
+
+test("强制收回 asMonitor：接口账号 + otherParams.ismonitor=1", async () => {
+  const { privateKey, spki } = keys();
+  const calls = [];
+  const client = new OAClient({ config: config(spki), credentials: resolver, fetchImpl: drawBackFetch(calls) });
+  await client.forceDrawBack("778899", { asMonitor: true });
+  assert.deepEqual(JSON.parse(calls[1].options.body), { requestId: 778899, otherParams: { ismonitor: "1" } });
+  assert.equal(decryptHeader(calls[1].options.headers.userid, privateKey), "10001");
+});
+
+test("强制收回：非数字单号或缺申请人时不调 OA", async () => {
+  const { spki } = keys();
+  const client = new OAClient({
+    config: config(spki),
+    credentials: resolver,
+    fetchImpl: async () => { throw new Error("must not call OA"); },
+  });
+  await assert.rejects(client.forceDrawBack("12a", { operatorUserId: "13437" }), (error) => error.code === "INVALID_REQUEST_ID");
+  await assert.rejects(client.forceDrawBack("778899", {}), (error) => error.code === "INVALID_CONFIGURATION");
+});
+
+test("强制收回：NO_PERMISSION 是明确拒绝，SYSTEM_INNER_ERROR 记结果不确定", async () => {
+  const { spki } = keys();
+  const originalLog = console.log;
+  console.log = () => {};
+  try {
+    const denied = new OAClient({ config: config(spki), credentials: resolver, fetchImpl: drawBackFetch([], { code: "NO_PERMISSION", errMsg: {} }) });
+    await assert.rejects(denied.forceDrawBack("778899", { operatorUserId: "13437" }), (error) => error.code === "NO_PERMISSION" && !error.ambiguous);
+    const inner = new OAClient({ config: config(spki), credentials: resolver, fetchImpl: drawBackFetch([], { code: "SYSTEM_INNER_ERROR", errMsg: {} }) });
+    await assert.rejects(inner.forceDrawBack("778899", { operatorUserId: "13437" }), (error) => error.code === "SYSTEM_INNER_ERROR" && error.ambiguous);
+  } finally {
+    console.log = originalLog;
+  }
+});

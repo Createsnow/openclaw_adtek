@@ -3,6 +3,7 @@ import { cancel } from "./actions/cancel.mjs";
 import { prepare } from "./actions/prepare.mjs";
 import { status } from "./actions/status.mjs";
 import { submitConfirmed } from "./actions/submit.mjs";
+import { withdraw } from "./actions/withdraw.mjs";
 import { loadBridgeConfig, loadSystems } from "./config.mjs";
 import { withHintZh } from "./hints.mjs";
 import { lookupRequesterProfile } from "./hrm-profile.mjs";
@@ -16,6 +17,7 @@ const ACTIONS = {
   status,
   cancel,
   submit_confirmed: submitConfirmed,
+  withdraw,
 };
 
 /** 需要 confirmationId 的动作。 */
@@ -54,12 +56,16 @@ const PARAMETERS = {
   properties: {
     action: {
       type: "string",
-      enum: ["prepare", "attach", "submit_confirmed", "status", "cancel"],
-      description: "prepare 建待确认（已有待确认单会被替换）；attach 只收图片/文件；submit_confirmed 确认后建 OA；status 按人查当前待确认和最近已提交；cancel 作废待确认。",
+      enum: ["prepare", "attach", "submit_confirmed", "status", "cancel", "withdraw"],
+      description: "prepare 建待确认（已有待确认单会被替换）；attach 只收图片/文件；submit_confirmed 确认后建 OA；status 按人查当前待确认和最近已提交；cancel 作废待确认；withdraw 撤回（强制收回）已提交到 OA 的单。",
     },
     confirmationId: {
       type: "string",
       description: "内部确认号。员工确认/取消/补附件时传入；查进度不要传。禁止展示给员工。",
+    },
+    requestId: {
+      type: "string",
+      description: "仅 withdraw：员工自己报了要撤回的 OA 工单号才传，只抄数字；没报就不传（插件会找此人唯一一张已提交的单，或列出来让员工选）。其它 action 不要传。",
     },
     supplement: {
       type: "string",
@@ -110,7 +116,7 @@ const PARAMETERS = {
   required: ["action"],
 };
 
-const DESCRIPTION = "IT 工单：整理员工报的问题成待确认单，员工确认后提交到 OA 流程。图片 / 文件由插件自动收下，不必传路径。每个回执都有 replyZh：那就是要发给员工的整段回复，原样输出，不要改写、不要再加别的话（只有 BUFFERED 之后可以再追问一句缺的信息）。不要传工单号、URL、凭据、流程 ID、OA 字段名或人员 id。";
+const DESCRIPTION = "IT 工单：整理员工报的问题成待确认单，员工确认后提交到 OA 流程。图片 / 文件由插件自动收下，不必传路径。每个回执都有 replyZh：那就是要发给员工的整段回复，原样输出，不要改写、不要再加别的话（只有 BUFFERED 之后可以再追问一句缺的信息）。不要传 URL、凭据、流程 ID、OA 字段名或人员 id；工单号只在 withdraw 时按员工原话传 requestId。";
 
 /**
  * dependencies（测试注入）：loadConfig、loadSystems、clientFactory、lookupRequesterProfile、

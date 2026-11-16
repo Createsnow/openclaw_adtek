@@ -389,3 +389,56 @@ curl -sS -X POST 'https://adtekoa.com/api/hrm/resful/getHrmUserInfoWithPage' \
     }
 }
 ```
+
+---
+
+## 第五步：强制收回已提交的流程（撤回工单）
+
+员工对小A说「撤回工单」时，桥接 `withdraw` 调本接口，把已提交的单从处理人那里收回到申请人。Ecology 9.00 起支持。
+
+### 请求信息
+
+| 项目 | 内容 |
+| --- | --- |
+| **请求方式** | `POST` |
+| **接口地址** | `https://adtekoa.com/api/workflow/paService/doForceDrawBack` |
+| **请求头** | 与 `doCreateRequest` 相同：`token` + `appid` + `userid`（RSA 加密的人员 id）+ `Content-Type: application/json` |
+
+### 请求参数说明
+
+| 参数名 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `requestId` | Int | 是 | 流程请求 id，即员工看到的「工单号」（`doCreateRequest` 返回的 `requestid`） |
+| `otherParams` | Json | 否 | `{"ismonitor":"1"}` 表示用监控权限收回；不传则按 Header `userid` 这个操作者自己的权限收回 |
+
+### 请求体（Body）示例
+
+```json
+{ "requestId": 1504371 }
+```
+
+监控权限收回：
+
+```json
+{ "requestId": 1504371, "otherParams": { "ismonitor": "1" } }
+```
+
+### 返回示例
+
+```json
+{ "code": "SUCCESS", "errMsg": {} }
+```
+
+### 返回参数说明
+
+| 参数名 | 类型 | 说明 |
+| --- | --- | --- |
+| `code` | String | `SUCCESS` 成功；`PARAM_ERROR` 参数错误；`NO_PERMISSION` 无权限；`SYSTEM_INNER_ERROR` 程序异常；`USER_EXCEPTION` 用户异常 |
+| `errMsg` | Json | 异常信息，例如 `PARAM_ERROR` 时返回错误参数 |
+
+### xA 用法
+
+- 默认 Header `userid` = RSA(**申请人**人员 id，即建单时的 `oa_requester_id`)，不带 `otherParams`：以申请人自己的权限收回，处理人已办理时 OA 一般回 `NO_PERMISSION`。
+- `bridge-config.json` 设 `withdrawAsMonitor: true` 时改为 Header = 接口账号（`OA_API_USER_ID`）、Body 带 `"otherParams":{"ismonitor":"1"}`。接口账号须在 OA 有流程 602 的**监控**权限，否则同样 `NO_PERMISSION`。
+- 不论哪种方式，桥接只允许员工撤回 `oa_ticket` 里本人 `status=submitted` 的单，不会按模型或员工报的任意单号收回别人的流程。
+- 只认 `code=SUCCESS`；`SYSTEM_INNER_ERROR`、网络中断、`HTTP_5xx` 视为结果不明（可安全再试），其余视为拒绝。收回后流程仍在 OA，退回申请人待办，不会被删除。

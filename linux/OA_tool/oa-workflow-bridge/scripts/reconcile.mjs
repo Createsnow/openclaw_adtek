@@ -40,7 +40,9 @@ for (const line of (await readFile(oaFile, "utf8")).split(/\r?\n/)) {
 }
 const submitted = [...ours.values()].filter((row) => row.status === "submitted").map((row) => String(row.request_id));
 const missingInOa = submitted.filter((id) => !oaIds.has(id));
-const unknownWithId = [...ours.values()].filter((row) => row.status !== "submitted").map((row) => ({
+// withdrawn：员工经小A强制收回，OA 里仍有这张单（退回申请人），不算异常。
+const withdrawn = [...ours.values()].filter((row) => row.status === "withdrawn").map((row) => String(row.request_id));
+const unknownWithId = [...ours.values()].filter((row) => row.status !== "submitted" && row.status !== "withdrawn").map((row) => ({
   requestId: String(row.request_id),
   status: row.status,
   inOa: oaIds.has(String(row.request_id)),
@@ -49,6 +51,7 @@ console.log(JSON.stringify({
   submittedByXa: submitted.length,
   foundInOa: submitted.length - missingInOa.length,
   missingInOa,
+  withdrawnByEmployee: withdrawn,
   notMarkedSubmitted: unknownWithId,
 }, null, 2));
 process.exitCode = missingInOa.length ? 1 : 0;
