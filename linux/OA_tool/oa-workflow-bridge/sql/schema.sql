@@ -1,7 +1,7 @@
 -- oa-workflow-bridge 建表语句（MySQL 5.7+ / 8.x，MariaDB 10.6+）。
--- 与 src/db.mjs 的 MYSQL_SCHEMA 逐字一致（tests/schema-sql.test.mjs 校验）；改表时两处一起改，并在本目录加一份迁移脚本。
--- 新库：插件启动时会自动执行同样的 CREATE TABLE IF NOT EXISTS；DBA 也可以先手工执行本文件。
--- 老库：CREATE TABLE IF NOT EXISTS 不会补列，按文件名日期顺序执行本目录的迁移脚本。
+-- 与 src/db.mjs 的 MYSQL_SCHEMA 逐字一致（tests/schema-sql.test.mjs 校验），改表时两处一起改。
+-- 插件启动时会自动执行同样的建表语句（IF NOT EXISTS）；DBA 也可以在新库上先手工执行本文件。
+-- 不做迁移：已有的表不会被补列，表结构变了就起新库。
 
 CREATE TABLE IF NOT EXISTS oa_ticket (
     confirmation_id    VARCHAR(64)  NOT NULL,
@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS oa_ticket (
     staged_json        TEXT         NULL,
     request_id         VARCHAR(32)  NULL,
     error_code         VARCHAR(64)  NULL,
+    submitted_at       BIGINT       NULL,
     expires_at         BIGINT       NOT NULL,
     created_at         BIGINT       NOT NULL,
     updated_at         BIGINT       NOT NULL,

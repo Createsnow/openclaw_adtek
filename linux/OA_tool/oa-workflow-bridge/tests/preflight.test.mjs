@@ -55,28 +55,6 @@ test("表还没建时报 DB_SCHEMA_MISSING，预检不建表并关闭连接", as
   assert.equal(closed, 1);
 });
 
-test("老库缺新列时报 DB_SCHEMA_OUTDATED，不调 OA、不改表", async () => {
-  const oa = { calls: 0 };
-  const result = await runReadonlyPreflight({
-    loadConfig: async () => config(),
-    createDb: async () => ({
-      query: async (sql) => {
-        if (/ticket_type/.test(sql)) {
-          const error = new Error("Unknown column 'ticket_type' in 'field list'");
-          error.code = "ER_BAD_FIELD_ERROR";
-          throw error;
-        }
-        return [];
-      },
-      run: async () => { throw new Error("preflight must not write"); },
-      close: async () => {},
-    }),
-    clientFactory: oaClient(oa),
-  });
-  assert.equal(result.code, "DB_SCHEMA_OUTDATED");
-  assert.equal(oa.calls, 0);
-});
-
 test("MySQL 与 OA 都通过时预检成功", async () => {
   const oa = { calls: 0 };
   const result = await runReadonlyPreflight({

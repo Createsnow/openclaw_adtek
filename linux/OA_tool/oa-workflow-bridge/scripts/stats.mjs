@@ -25,16 +25,25 @@ try {
        FROM oa_ticket WHERE created_at >= ?`,
     [since],
   );
-  const perDay = await db.query(
-    `SELECT DATE_FORMAT(FROM_UNIXTIME(created_at / 1000), '%Y-%m-%d') AS day,
-            COUNT(*) AS prepared,
-            SUM(status = 'submitted') AS submitted
-       FROM oa_ticket WHERE created_at >= ? GROUP BY day ORDER BY day`,
+  // 建单按 created_at 落日，提交按 submitted_at（OA 返回单号的时刻）落日。
+  const dayOf = (column) => `DATE_FORMAT(FROM_UNIXTIME(${column} / 1000), '%Y-%m-%d')`;
+  const preparedPerDay = await db.query(
+    `SELECT ${dayOf("created_at")} AS day, COUNT(*) AS n FROM oa_ticket WHERE created_at >= ? GROUP BY day`,
     [since],
   );
-  // 类型 / 系统 / 地点是 prepare 时写入的列，终态后保留；本日期前的历史单为 NULL（显示为「未记录」）。
+  const submittedPerDay = await db.query(
+    `SELECT ${dayOf("submitted_at")} AS day, COUNT(*) AS n FROM oa_ticket
+      WHERE status = 'submitted' AND submitted_at >= ? GROUP BY day`,
+    [since],
+  );
+  const perDay = new Map();
+  for (const row of preparedPerDay) perDay.set(row.day, { day: row.day, prepared: Number(row.n), submitted: 0 });
+  for (const row of submittedPerDay) {
+    perDay.set(row.day, { day: row.day, prepared: perDay.get(row.day)?.prepared || 0, submitted: Number(row.n) });
+  }
+  // 类型 / 系统 / 地点是 prepare 时写入的列，终态后保留。地点得不出时为 NULL，显示为「未填」。
   const breakdown = (column) => db.query(
-    `SELECT COALESCE(${column}, '未记录') AS name, COUNT(*) AS prepared, SUM(status = 'submitted') AS submitted
+    `SELECT COALESCE(${column}, '未填') AS name, COUNT(*) AS prepared, SUM(status = 'submitted') AS submitted
        FROM oa_ticket WHERE created_at >= ? GROUP BY name ORDER BY prepared DESC`,
     [since],
   );
@@ -51,7 +60,7 @@ try {
     tickets: Object.fromEntries(byStatus.map((row) => [row.status, Number(row.n)])),
     users: Number(people[0]?.users || 0),
     usersWithSubmitted: Number(people[0]?.submitters || 0),
-    perDay: perDay.map((row) => ({ day: row.day, prepared: Number(row.prepared), submitted: Number(row.submitted) })),
+    perDay: [...perDay.values()].sort((a, b) => a.day.localeCompare(b.day)),
     byTicketType: byType.map(toCounts),
     bySystem: bySystem.map(toCounts),
     byLocation: byLocation.map(toCounts),

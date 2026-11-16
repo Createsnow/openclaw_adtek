@@ -1132,7 +1132,9 @@ test("台账保留工单类型 / 所属系统 / 地点：提交后描述清空�
     [pending.ticketType, pending.systemName, pending.location],
     ["运维支持", "MES系统（越南B部）", "越南"],
   );
+  assert.equal(pending.submittedAt, null, "未提交时没有提交时间");
 
+  const before = Date.now();
   const submitted = parse(await factory(context()).execute("call-2", {
     action: "submit_confirmed",
     confirmationId: prepared.confirmationId,
@@ -1145,6 +1147,7 @@ test("台账保留工单类型 / 所属系统 / 地点：提交后描述清空�
     [ledger.ticketType, ledger.systemName, ledger.location, ledger.requestId],
     ["运维支持", "MES系统（越南B部）", "越南", "1600002"],
   );
+  assert.ok(ledger.submittedAt >= before && ledger.submittedAt <= Date.now(), "记 submitted 时写入提交时间");
 });
 
 test("规则未命中兜底的单：台账记运维支持 / 其他，地点为空", async (t) => {

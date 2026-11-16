@@ -87,7 +87,7 @@ cp "$REPO/docker/.env.example" ~/xa/.env
 
 ## 3. 准备独立 MySQL（DBA 在 MySQL 机器上做）
 
-要求：MySQL 5.7+ / 8.x 或 MariaDB 10.6+，`utf8mb4`，InnoDB。数据量很小（每张确认单一行），插件连接池最多 10 个连接。表由插件启动时自动建（建表语句的独立副本在 `OA_tool/oa-workflow-bridge/sql/schema.sql`，也可先手工执行）。
+要求：MySQL 5.7+ / 8.x 或 MariaDB 10.6+，`utf8mb4`，InnoDB。数据量很小（每张确认单一行），插件连接池最多 10 个连接。表由插件启动时自动建（建表语句的独立副本在 `OA_tool/oa-workflow-bridge/sql/schema.sql`，也可先手工执行）。不做迁移：表结构变了就起新库。
 
 ```sql
 CREATE DATABASE IF NOT EXISTS xa_oa CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -101,7 +101,6 @@ FLUSH PRIVILEGES;
 - 裸装后跑 `mysql_secure_installation`。匿名账号 `''@'localhost'` 会抢先匹配，表现为 `Access denied for user 'xa_oa'@'localhost'`。
 - 备份：开 binlog 或每日 `mysqldump --single-transaction --routines xa_oa > xa_oa_$(date +%F).sql`。`oa_ticket` 是台账要保留；`oa_inbox` / `oa_identity` 是缓存，丢了会重建。
 - 两个 Gateway 不能连同一个库；测试库和生产库分开（集成测试会清表）。
-- 老库升级：插件只做 `CREATE TABLE IF NOT EXISTS`，不会补列。升级镜像前，按文件名日期顺序执行 `sql/` 下还没执行过的 `YYYYMMDD_*.sql`（如 `20261116_oa_ticket_type_system_location.sql`：`oa_ticket` 加类型 / 系统 / 地点三列），再跑 OA 只读预检，不报 `DB_SCHEMA_OUTDATED` 即可。新库不用跑。
 
 Gateway 虚机上验证：`nc -vz <MySQL 主机> 3306`。
 

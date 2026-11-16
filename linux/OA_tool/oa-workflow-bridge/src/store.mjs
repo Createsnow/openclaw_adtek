@@ -60,6 +60,7 @@ function rowToTicket(row) {
     staged: parseJson(row.staged_json, []),
     requestId: row.request_id || null,
     errorCode: row.error_code || null,
+    submittedAt: row.submitted_at ? Number(row.submitted_at) : null,
     expiresAt: Number(row.expires_at),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
@@ -137,12 +138,17 @@ export async function insertTicket(store, ticket) {
  * `expectStatus` 给了就只在当前状态匹配时才改，返回是否改到。
  */
 export async function updateTicket(store, confirmationId, { status, staged, requestId, errorCode, expectStatus } = {}) {
+  const now = Date.now();
   const sets = ["updated_at = ?"];
-  const params = [Date.now()];
+  const params = [now];
   if (status) {
     sets.push("status = ?", ACTIVE.has(status) ? "active_sender = sender_code" : "active_sender = NULL");
     params.push(status);
     if (TERMINAL.has(status)) sets.push("draft_json = NULL", "staged_json = NULL");
+    if (status === "submitted") {
+      sets.push("submitted_at = COALESCE(submitted_at, ?)");
+      params.push(now);
+    }
   }
   if (staged && !TERMINAL.has(status)) {
     sets.push("staged_json = ?");

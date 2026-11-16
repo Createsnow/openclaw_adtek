@@ -23,7 +23,7 @@ const db = await createMysqlDb((await loadBridgeConfig()).mysql);
 let rows;
 try {
   rows = await db.query(
-    `SELECT request_id, external_ticket_id, ticket_type, system_name, location, status, updated_at FROM oa_ticket
+    `SELECT request_id, external_ticket_id, ticket_type, system_name, location, status, submitted_at, updated_at FROM oa_ticket
       WHERE request_id IS NOT NULL ORDER BY updated_at`,
   );
 } finally {
@@ -32,7 +32,7 @@ try {
 
 const ours = new Map(rows.map((row) => [String(row.request_id), row]));
 if (!oaFile) {
-  console.log("requestId,externalTicketId,ticketType,systemName,location,status,updatedAt");
+  console.log("requestId,externalTicketId,ticketType,systemName,location,status,submittedAt,updatedAt");
   for (const row of rows) {
     console.log([
       row.request_id,
@@ -41,6 +41,7 @@ if (!oaFile) {
       csvCell(row.system_name),
       csvCell(row.location),
       row.status,
+      row.submitted_at ? new Date(Number(row.submitted_at)).toISOString() : "",
       new Date(Number(row.updated_at)).toISOString(),
     ].join(","));
   }

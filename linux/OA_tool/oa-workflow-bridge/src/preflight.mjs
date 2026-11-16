@@ -25,9 +25,7 @@ export async function runReadonlyPreflight({
       db = await createDb(config.mysql);
       await checkSchema(db);
     } catch (error) {
-      const code = error?.code === "ER_NO_SUCH_TABLE" ? "DB_SCHEMA_MISSING"
-        : error?.code === "DB_SCHEMA_OUTDATED" ? "DB_SCHEMA_OUTDATED"
-          : "DB_UNAVAILABLE";
+      const code = error?.code === "ER_NO_SUCH_TABLE" ? "DB_SCHEMA_MISSING" : "DB_UNAVAILABLE";
       return fail(code, error?.message || "MySQL is unavailable");
     }
     try {

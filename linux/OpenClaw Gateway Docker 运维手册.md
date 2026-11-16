@@ -231,11 +231,12 @@ SELECT confirmation_id, external_ticket_id, status, request_id, error_code, oa_r
 
 **2. 对 Ecology**：按申请人 `oa_requester_id`、`created` 时间、流程 602、标题前缀 `[IT-…]`（`external_ticket_id`）找有没有数字 `requestId`。
 
-**3a. OA 里有单 → 收成已提交**，并把数字单号告诉员工：
+**3a. OA 里有单 → 收成已提交**，并把数字单号告诉员工。`submitted_at` 填 OA 里这张单的建单时间，不要填对账当天：
 
 ```sql
 UPDATE xa_oa.oa_ticket
    SET status = 'submitted', request_id = '<数字单号>', active_sender = NULL,
+       submitted_at = UNIX_TIMESTAMP('<OA 建单时间，如 2026-11-16 10:05:00>') * 1000,
        draft_json = NULL, staged_json = NULL, updated_at = UNIX_TIMESTAMP() * 1000
  WHERE confirmation_id = 'OA-…' AND status IN ('unknown', 'submitting');
 ```
