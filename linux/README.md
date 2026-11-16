@@ -37,7 +37,7 @@ xA IT 服务台「小A」的完整工程包：员工在企业微信报修，模�
 │   ├── openclaw.json          现网配置样例（容器路径，凭据全是 ${VAR}）
 │   └── workspace/             注入给 Agent 的规则文件
 └── OA_tool/
-    ├── oa-workflow-bridge/    OA 桥接插件（含身份转换 src/identity/、systems.json、scripts/、tests/）
+    ├── oa-workflow-bridge/    OA 桥接插件（含身份转换 src/identity/、systems.json、sql/ 建表与迁移、scripts/、tests/）
     └── *.md                   OA 与身份文档
 ```
 
