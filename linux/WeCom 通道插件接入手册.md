@@ -27,7 +27,7 @@
 
 | 字段 | 现网 | 说明 |
 | --- | --- | --- |
-| `channels.wecom.botId` / `secret` | `${XA_IT_WECOM_BOT_ID}` / `${XA_IT_WECOM_BOT_SECRET}` | 真值只在 secret 文件 |
+| `channels.wecom.botId` / `secret` | `${XA_IT_WECOM_BOT_ID}` / `${XA_IT_WECOM_BOT_SECRET}` | 真值只在 `.env` |
 | `dmPolicy` / `groupPolicy` | `open` | 生产要收紧时改 `dmPolicy: allowlist` + `allowFrom: [userid…]` |
 | `allowFrom` | `["*"]` | `dmPolicy: open` 时必须含 `"*"`，否则所有私聊被丢弃（日志 `all DMs will be dropped`） |
 | `sendThinkingMessage` | `true` | 见第 3 节，插件 ≥ 2026.7.2 才能开 |
@@ -74,7 +74,7 @@ oc plugins list      # version 必须变成目标号
 
 升完先把 `sendThinkingMessage` 设 `false` 测收发，正常后再打开。不要用 `doctor --fix` 装或升插件。
 
-插件若是拷进 `~/xa/extensions/` 并写在 `load.paths` 的旧装法，`plugins install/update` 不会改那份目录：删掉那条 path，改走 npm 托管，`down && up`。
+插件若是拷进 `~/xa/extensions/` 并写在 `load.paths` 的旧装法，`plugins install/update` 不会改那份目录：删掉那条 path，改走 npm 托管，`docker compose up -d --force-recreate`。
 
 参考：[OpenClaw WeCom](https://docs.openclaw.ai/channels/wecom)、[Manage plugins](https://docs.openclaw.ai/plugins/manage-plugins)。
 
@@ -83,7 +83,7 @@ oc plugins list      # version 必须变成目标号
 | 现象 | 处理 |
 | --- | --- |
 | `blocked by allowlist` | `plugins.allow` 加 `wecom-openclaw-plugin`，entries enabled |
-| `unknown channel id: wecom` / `plugin path not found` | 插件没装就写了通道：去掉 `channels` 与 `bindings`，`down && up`，先装插件 |
+| `unknown channel id: wecom` / `plugin path not found` | 插件没装就写了通道：去掉 `channels` 与 `bindings`，`docker compose restart`，先装插件 |
 | `before_prompt_build blocked`（plugin=wecom-openclaw-plugin） | 企微那条 entries 补 `hooks.allowConversationAccess: true`，`restart` |
 | `channels list` 为空 | 缺 `channels.wecom`，或插件没 enabled |
 | 私聊没回复，日志 `DM dropped` | `allowFrom` 缺 `"*"` |
@@ -91,5 +91,5 @@ oc plugins list      # version 必须变成目标号
 | `[wecom] channel autostart suppressed` | 崩溃熔断，见运维手册第 8 节；不要 `channels start --channel` |
 | 能连上但回复不对 / 不回复 | 查模型，见 DashScope 手册 |
 | 日志出现 `smartsheet_get_records`、`errcode=851014` | 模型调了企微文档 MCP：两处 `alsoAllow` 只留 `oa_workflow`，两处 `skills: []`，`restart` 后 `/new`，`/context detail` 中 `Skills list` 为 0。不要为此去授权企微文档 |
-| `docker exec` 报 `missing env var` | exec 不跑 entrypoint，可忽略；以主进程日志为准 |
+| 已有目标版本还 `--force` 重装，报 `Plugin artifact has no valid plugin manifest` | 不用重装；`plugins list` 已是目标版本就跳过 |
 | 两个 Gateway 用同一 Bot | 只留一个 |

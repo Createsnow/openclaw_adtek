@@ -5,8 +5,8 @@
 基础：
 
 - 格式是 JSON5，按 schema 严格校验。改完先 `config validate`。
-- `${VAR}` 引用环境变量（仅大写名），真值来自 secret，见安装手册第 4 节。
-- 多数字段热重载；`plugins.load.paths`、`gateway.port` / `bind` 要重启，env 变了要 `down && up`。
+- `${VAR}` 引用环境变量（仅大写名），真值写在 `~/xa/.env`，见安装手册第 4 节。
+- 多数字段热重载；`plugins.load.paths`、`gateway.port` / `bind` 要重启；`.env` 变了要 `docker compose up -d`。
 - 运行时会自动写 `meta`、`wizard`，不用手改。旧模板里的 `meta.handoffTemplate` 等不是合法字段，会 `meta: Invalid input`。
 
 ## 1. 三层门控：插件、工具、Skill
@@ -90,7 +90,7 @@ agents.entries.itservicedeskagent
 | --- | --- | --- |
 | `mode` | `local` | 本机跑 Gateway |
 | `port` | `18789` | 优先级：CLI `--port` > `OPENCLAW_GATEWAY_PORT` > 本字段 |
-| `bind` | `lan` | Docker 桥接网络下端口映射从容器网卡进来，`loopback` 收不到。只能写关键字 `lan` / `loopback` / `auto` / `tailnet` / `custom`，写 IP 会校验失败。与 entrypoint `--bind lan`、compose `OPENCLAW_GATEWAY_BIND` 保持一致 |
+| `bind` | `lan` | Docker 桥接网络下端口映射从容器网卡进来，`loopback` 收不到。只能写关键字 `lan` / `loopback` / `auto` / `tailnet` / `custom`，写 IP 会校验失败。与 compose 里的启动参数 `--bind lan`、`OPENCLAW_GATEWAY_BIND` 保持一致 |
 | `auth` | `mode: token`，`token: ${OPENCLAW_GATEWAY_TOKEN}` | 非 loopback 必须有鉴权，否则拒绝启动 |
 | `tailscale.mode` | `off` | 不用 |
 | `controlUi.allowedOrigins` | `http://localhost:18789`、`http://127.0.0.1:18789` | 经 SSH 隧道打开 Dashboard |
@@ -103,7 +103,7 @@ agents.entries.itservicedeskagent
 | --- | --- | --- |
 | `allow` | `oa-workflow-bridge`、`wecom-openclaw-plugin` | 白名单，不在里面的不加载 |
 | `deny` | `codex` | 显式禁用 |
-| `load.paths` | `/opt/xa/oa-workflow-bridge` | OA 插件在镜像里；企微插件 npm 托管，不写路径。启动时读取，改了要 `down && up` |
+| `load.paths` | `/opt/xa/oa-workflow-bridge` | OA 插件在镜像里；企微插件 npm 托管，不写路径。启动时读取，改了要重启 |
 | `entries.*.hooks.allowConversationAccess` | 两个插件都 `true` | OA 桥接要收 `message_received` 等事件落附件；企微不开会 `before_prompt_build blocked` |
 
 OA 建单开关、身份转换开关都不在本文件，在 `oa-bridge-config.json`（`active`、`identity.adapter`）。
@@ -117,5 +117,5 @@ OA 建单开关、身份转换开关都不在本文件，在 `oa-bridge-config.j
 | 关企微收发 | 关 `channels.wecom.enabled` 或插件 entries | 去掉 `wecom_mcp` |
 | 暂停建单 | `oa-bridge-config.json` 的 `active: false` | 把 `oa_workflow` 移出白名单 |
 | 让模型看图 | 不做 | 打开 `read` / `tools.media` / `imageModel` |
-| 换模型 | 只改 `model_id.txt` / `model_ref.txt` | `config set` 写明文 |
+| 换模型 | 只改 `.env` 的 `XA_DOMESTIC_MODEL_ID` | `config set` 写明文 |
 | 迁旧 `agents.list` | 备份后 `doctor --fix`，再 `config validate` | `list` 和 `entries` 混写 |

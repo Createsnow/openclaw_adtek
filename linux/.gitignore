@@ -1,1 +1,3 @@
 node_modules/
+# 凭据只放在部署目录的 .env，永远不进仓库
+.env

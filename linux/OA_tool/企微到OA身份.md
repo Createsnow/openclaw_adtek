@@ -14,13 +14,13 @@
 | 名称 | 形态 | 放在哪 | 用在哪 |
 | --- | --- | --- | --- |
 | appid | 如 `2026-09-01-xxxx` | `oa-bridge-config.json` 的 `appId` | 每个 Ecology 请求 Header `appid` |
-| AppSecret | UUID 形态 | `oa_app_secret.txt` → `OA_APP_SECRET` | 只在 `applytoken` 时 RSA 加密后用 |
-| 接口账号人员 id | 1–18 位数字 | `oa_api_user_id.txt` → `OA_API_USER_ID` | 只用于只读预检 Header `userid` |
+| AppSecret | UUID 形态 | `.env` 的 `OA_APP_SECRET` | 只在 `applytoken` 时 RSA 加密后用 |
+| 接口账号人员 id | 1–18 位数字 | `.env` 的 `OA_API_USER_ID` | 只用于只读预检 Header `userid` |
 | **申请人人员 id** | 1–18 位数字 | `oa_identity` 缓存、工单 `oa_requester_id` | 建单 Header `userid`（RSA）、表单 `xqsqr`、提交前 `getHrmSimpleInfo` |
 
 **建单 Header `userid` 必须是申请人。** 用接口账号的话，单据会落在接口账号名下，即使 `xqsqr` 填了员工。管理员还要确认该应用能以员工身份创建流程 602（`isVerifyPer=1`）。
 
-接口账号人员 id 不知道时，用该账号工号调 `getHrmUserInfoWithPage` 自查（见 Ecology 文档第 4 节），只抄 `data.dataList[].id`。不要把 appid、工号、`wo…` 写进 `oa_api_user_id.txt`。
+接口账号人员 id 不知道时，用该账号工号调 `getHrmUserInfoWithPage` 自查（见 Ecology 文档第 4 节），只抄 `data.dataList[].id`。不要把 appid、工号、`wo…` 填进 `OA_API_USER_ID`。
 
 AGENTS.md 里的「建议责任人」是给员工看的姓名，不是身份映射；OA 处理人 id 在 `systems.json`。
 
@@ -90,11 +90,11 @@ docker exec -it xa-gateway node /opt/xa/oa-workflow-bridge/scripts/manual-resolv
 | 位置 | 内容 |
 | --- | --- |
 | `oa-bridge-config.json` | `appId`、`publicKeySpkiBase64`（新应用给了新公钥要换）、`"identity": {"adapter": "on"}` |
-| `secrets/oa_app_secret.txt`、`oa_api_user_id.txt` | OA 凭据 |
-| `secrets/wecom_identity_corpid.txt`、`wecom_identity_secret.txt` | 企微**自建应用**凭据（不是机器人 BotSecret）；员工要在该应用可见范围内 |
+| `.env` 的 `OA_APP_SECRET`、`OA_API_USER_ID` | OA 凭据 |
+| `.env` 的 `WECOM_IDENTITY_CORPID`、`WECOM_IDENTITY_SECRET` | 企微**自建应用**凭据（不是机器人 BotSecret）；员工要在该应用可见范围内 |
 | `openclaw.json` | 不涉及 |
 
-只在宿主机写 txt 不够：必须 compose 声明 secret、entrypoint export、`down && up`（仓库 `docker/` 已写好）。
+改了 `.env` 要 `docker compose up -d` 才会进容器（`restart` 不行）。
 
 上线自检：只读预检通过 → 测试号 `prepare` 得到 `AWAITING_CONFIRMATION`，`oa_identity` 多一行。预检码含义：`TOKEN_REJECTED` = secret / appid / 公钥有一个不对；`INVALID_CONFIGURATION` / `NOT_CONFIGURED` = 接口账号人员 id 缺失或不是纯数字。
 
@@ -102,14 +102,13 @@ docker exec -it xa-gateway node /opt/xa/oa-workflow-bridge/scripts/manual-resolv
 
 `oa_workflow` 回执不写 stdout，`docker logs | grep OA_IDENTITY` 为空是正常的，要去会话 jsonl 里看。
 
-先看转换凭据是否注入（只判断有无）：
+先看转换凭据是否注入（只判断有无，不打印值）：
 
 ```bash
-docker exec xa-gateway sh -c 'test -s /run/secrets/wecom_identity_corpid && test -s /run/secrets/wecom_identity_secret && echo FILES_OK || echo FILES_MISSING'
-docker exec xa-gateway sh -c 'for d in /proc/[0-9]*; do tr "\0" "\n" < "$d/environ" 2>/dev/null | grep -q "^WECOM_IDENTITY_SECRET=" && { echo INJECTED; exit 0; }; done; echo NOT_INJECTED'
+docker exec xa-gateway sh -c 'test -n "$WECOM_IDENTITY_CORPID" && test -n "$WECOM_IDENTITY_SECRET" && echo INJECTED || echo NOT_INJECTED'
 ```
 
-`FILES_MISSING` = compose 没挂；`FILES_OK` + `NOT_INJECTED` = entrypoint 没 export 或没 `down && up`。
+`NOT_INJECTED` = 改了 `.env` 之后没有 `docker compose up -d`，或 compose 不是仓库版本。
 
 再抽最新会话里的 `oa_workflow` 回执码（不要 `cat` 整份 jsonl，里面有加密 userid）：
 
@@ -132,7 +131,7 @@ PY
 
 | 回执 `code` | 处理 |
 | --- | --- |
-| `OA_IDENTITY_NOT_CONFIGURED` | 补 compose / entrypoint，`down && up`。不要改 `adapter=off` 绕过 |
+| `OA_IDENTITY_NOT_CONFIGURED` | `.env` 补上两项后 `docker compose up -d`。不要改 `adapter=off` 绕过 |
 | `WECOM_IDENTITY_TOKEN_FAILED` | 自建应用 secret 不对（别用 BotSecret） |
 | `WECOM_IDENTITY_OUT_OF_SCOPE` | 把员工加进该自建应用可见范围 |
 | `WECOM_IDENTITY_ALIGN_MISMATCH` | 企微账号与扩展属性「工号」不一致，找企微管理员 |

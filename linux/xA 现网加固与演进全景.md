@@ -30,8 +30,10 @@ OpenClaw Gateway（单容器、单进程）
 | 身份 | 桥接内身份转换 + `oa_identity` 缓存 | 手工映射文件；把加密 userid 当工号 |
 | 模型 | 百炼兼容接口，catalog 仅 `text`，关思考链 | 多模态进 Agent |
 | 工具 | `minimal` + 只放行 `oa_workflow` | `coding` / `full`；给模型 `read` |
-| 凭据 | Compose secrets → entrypoint → `${VAR}` | json 明文；OpenClaw 直连配置中心 |
+| 凭据 | 一个 `~/xa/.env` → compose 注入环境变量 → `${VAR}` | json 明文；OpenClaw 直连配置中心 |
 | 规则 | 会话开始注入 `AGENTS.md` | 热路径再 `read` 一堆 Markdown |
+| 运行身份 | 容器以宿主机当前用户 uid 运行 | 固定 uid 1000 再到处 chown |
+| 并发 | 插件按人加锁，不同员工互不等待 | 全局一把锁 |
 
 技术栈：Ubuntu 24.04；OpenClaw 2026.9.2（自建镜像 `xa-gateway-oa` = 官方镜像 + 桥接插件 + `mysql2` / `jpeg-js` / `pngjs`）；企微插件 `@wecom/wecom-openclaw-plugin` ≥ 2026.7.2；百炼 Provider `bailian`，超时 20 秒；MySQL 5.7+。
 
@@ -41,17 +43,16 @@ OpenClaw Gateway（单容器、单进程）
 SmartX 集群（平台运维：虚机规格、存储、网络、快照）
  └── Linux 虚机（本系统）
       └── ~/xa/
-          ├── docker-compose.yml       image xa-gateway-oa，端口只绑 127.0.0.1:18789
-          ├── entrypoint.sh            读 /run/secrets → export → gateway --bind lan
+          ├── docker-compose.yml       image xa-gateway-oa，端口只绑 127.0.0.1:18789，以 XA_UID 运行
+          ├── .env                     全部凭据与 XA_UID / XA_GID（不进 git）
           ├── config/openclaw.json     → /home/node/.openclaw
           ├── workspace/               Agent 规则（AGENTS.md 等）
           ├── extensions/              企微插件（OA 插件在镜像 /opt/xa/oa-workflow-bridge）
-          ├── oa-bridge-config.json    只读挂进插件目录（不含密码）
-          └── secrets/*.txt            12 个凭据文件，600
+          └── oa-bridge-config.json    只读挂进插件目录（不含密码）
 ```
 
 - 工作区放虚机本机盘，不要 NFS / CIFS / 共享盘。
-- 改 secret、插件路径、端口必须 `down && up`，环境变量不热更。
+- 改 `.env`、插件路径、端口要 `docker compose up -d`（自动重建容器），环境变量不热更。
 - MySQL 要先可连（插件加载即建表）。
 - 三套凭据不能混：企微机器人 BotId/BotSecret（收发）、企微自建应用 corpid/secret（身份转换）、OA appid/AppSecret（建单）。
 
@@ -159,6 +160,7 @@ sequenceDiagram
 | 百炼 `compat.thinkingFormat: qwen` + 超时 20 秒 | 首包到回复从十几秒降到 2～5 秒；封住约 27 秒的空等 |
 | 身份缓存、OA token 缓存约 25 分钟 | 命中时零外部 HTTP；建单通常只换一次 token |
 | 提交时压图与取资料并行 | 缩短建单耗时 |
+| 插件按人加锁，MySQL 连接池 10 | 集中报障时，一个人传大附件不再挡住其他人 |
 | 容器日志轮转 20m × 5 | stdout 不再涨盘 |
 
 可继续：
@@ -175,7 +177,7 @@ sequenceDiagram
 | --- | --- |
 | 不能水平扩同一 Bot | 进程内锁 + 企微单账号，忙了只能加机器 |
 | 无热更新 | 改凭据、插件路径要重启 |
-| secrets 是宿主机明文文件 | 靠 `600`；无集中审计、版本、灰度 |
+| 凭据是宿主机上的明文 `.env` | 靠只给运维登录和 docker 权限；无集中审计、版本、灰度 |
 | `AGENTS.md` 体积紧 | 已超默认 20000，再加内容可能被截断 |
 | 身份 miss 依赖外部 | 企微通讯录 + 人事接口；回执码在会话 jsonl，不在 `docker logs` |
 | 全局一张待确认偏硬 | 员工换对话后体验像卡住 |
@@ -191,14 +193,14 @@ sequenceDiagram
 | 目标 | 做法 |
 | --- | --- |
 | 同一个 IT 服务台人变多 | 不复制；平台扩虚机，百炼加配额 |
-| 另一个机器人 / 业务线 / 测试环境 | 复制一套：新目录、容器名、宿主端口、secrets、企微 Bot、Gateway token、agent id。例：`~/xa-hr` 18790、`~/xa-staging` 18791（容器内仍 18789）。可共用 MySQL 服务器但必须不同库 |
+| 另一个机器人 / 业务线 / 测试环境 | 复制一套：新目录、容器名、宿主端口、`.env`、企微 Bot、Gateway token、agent id。例：`~/xa-hr` 18790、`~/xa-staging` 18791（容器内仍 18789）。可共用 MySQL 服务器但必须不同库 |
 | 同一企微通道多 Agent 路由 | 先验证企微插件多账号，再在**同一个** Gateway 里加 agent 和 bindings |
 | 公司级生产 | 密钥进 Vault / 配置中心；主备切换流程化，备机预装镜像 |
 
-**配置中心（Nacos）**：OpenClaw 不直连 Nacos，环境变量名不变，只换「谁给 secret 文件赋值」。
+**配置中心（Nacos）**：OpenClaw 不直连 Nacos，环境变量名不变，只换「谁来写 `.env`」。
 
-1. 先做：Nacos → 宿主机 sync 脚本写 `~/xa/secrets/*.txt`（一行、`600`）→ `down && up`。entrypoint 和 json 都不改；Nacos 宕机不影响已运行的容器。
-2. 再考虑：entrypoint 启动时直拉 Nacos（强依赖配置中心可用性），或 OpenClaw `secrets.providers.exec` 解析器（只适合凭据类字段）。
+1. 先做：Nacos → 宿主机 sync 脚本重写 `~/xa/.env` → `docker compose up -d`。compose 和 json 都不改；Nacos 宕机不影响已运行的容器。
+2. 再考虑：容器启动时直拉 Nacos（强依赖配置中心可用性），或 OpenClaw `secrets.providers.exec` 解析器（只适合凭据类字段）。
 3. 每套 `~/xa-*` 用独立 namespace / group，不共用 dataId。Nacos 访问凭据本身要单独注入。
 4. 不进配置中心：工具白名单、bindings、`load.paths`、规则包、OA `active` 开关。
 
@@ -208,7 +210,7 @@ sequenceDiagram
 - 域名、凭据、流程 ID、字段名、人员 id 都不由模型传；身份只认通道给的可信 `requesterSenderId`，群聊按实际发送人。
 - 两阶段：`prepare` 不写外部系统，员工确认后才提交；员工可见文案由插件拼。
 - 幂等：同号已提交拒绝；结果不明标 `unknown`，禁止自动重试。
-- 凭据走 secret → 环境变量；日志不记 token、密文、附件 base64、身份原值。
+- 凭据走 `.env` → 环境变量；日志不记 token、密文、附件 base64、身份原值。
 
 ## 10. 凭据边界
 

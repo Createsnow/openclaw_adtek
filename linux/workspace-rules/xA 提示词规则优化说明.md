@@ -35,7 +35,7 @@ OpenClaw 会话开始时注入上述 workspace 文件；热路径**不** `read` 
 cp -r "$REPO/workspace-rules/workspace/." ~/xa/workspace/
 ```
 
-工作区 Markdown 下一轮对话生效；插件代码或 `systems.json` 改了要重建镜像并 `down && up`（见安装手册第 5 节）。
+工作区 Markdown 下一轮对话生效；插件代码或 `systems.json` 改了要重建镜像并 `docker compose up -d`（见安装手册第 5 节）。
 
 ## 4. `openclaw.json` 里不能漏的
 

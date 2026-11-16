@@ -12,12 +12,7 @@
 | 容器内 CLI | `alias oc='docker exec -it xa-gateway node dist/index.js'` |
 | OA 状态库 | 独立 MySQL `xa_oa`，不在本机 compose 里 |
 
-`docker exec` 不跑 entrypoint，CLI 报 `missing env var` 不影响主进程。需要变量时用 `-e`，例如：
-
-```bash
-docker exec -it -e OPENCLAW_GATEWAY_TOKEN="$(tr -d '\n' < ~/xa/secrets/gateway_token.txt)" \
-  xa-gateway node dist/index.js config validate
-```
+凭据都在 `~/xa/.env`，由 compose 注入成容器环境变量。`docker exec` 里同样读得到，CLI 不用带 `-e`。容器以 `.env` 里的 `XA_UID` / `XA_GID` 运行，`~/xa` 下的文件不用 chown。
 
 改了什么、怎么生效：
 
@@ -26,9 +21,9 @@ docker exec -it -e OPENCLAW_GATEWAY_TOKEN="$(tr -d '\n' < ~/xa/secrets/gateway_t
 | `openclaw.json` 业务字段（tools、allowFrom、bindings） | 多数热重载；不生效再 `docker compose restart xa-gateway` |
 | `skills` / `bootstrapMaxChars` | `restart`，再在企微 `/new`（旧会话缓存截断结果） |
 | 工作区规则 `AGENTS.md` 等 | 下一轮对话生效；建议 `/new` |
-| `~/xa/secrets/*.txt`、entrypoint、compose、`plugins.load.paths`、端口 / bind | `docker compose down && docker compose up -d` |
-| `~/xa/oa-bridge-config.json` | `down && up`（只读挂载，不必重建镜像） |
-| OA 插件代码、`systems.json` | 重建镜像（建议新 tag），改 compose `image:`，`down && up` |
+| `~/xa/.env`、compose、`plugins.load.paths`、端口 / bind | `docker compose up -d`（compose 发现变化会自动重建容器；`restart` 读不到新的 `.env`） |
+| `~/xa/oa-bridge-config.json` | `docker compose restart`（只读挂载，不必重建镜像） |
+| OA 插件代码、`systems.json` | 重建镜像（建议新 tag），改 compose `image:`，`up -d` |
 
 改 json 前先 `config validate`。禁止在容器里 `onboard` / `setup`，禁止用 `config set` 把 `${VAR}` 覆盖成明文。Control UI 若写出 `~/xa/config/agents/itservicedeskagent/agent/models.json`（可能含明文 Key），删掉后 `restart`。
 
@@ -44,14 +39,14 @@ docker compose ps
 docker inspect -f 'Status={{.State.Status}} Health={{.State.Health.Status}} RestartCount={{.State.RestartCount}}' xa-gateway
 curl -sS -m 5 http://127.0.0.1:18789/healthz; echo
 df -h ~/xa
-stat -c '%a %n' ~/xa/secrets/*.txt
+test -f ~/xa/.env && echo ".env OK" || echo "FAIL: 缺 ~/xa/.env"
 test -f ~/xa/workspace/MEMORY.md && echo "MEMORY.md OK" || echo "FAIL: 缺 MEMORY.md"
 docker logs xa-gateway 2>&1 | grep -E 'agent model|Invalid config|breaker tripped|autostart suppressed|plugin path not found|MySQL init failed' | tail -n 20
 docker stats --no-stream xa-gateway
 EOF
 ```
 
-期望：`Up (healthy)`，RestartCount 不持续增加，`/healthz` 含 `"ok":true`，secret 为 `600`，日志只有 `agent model: bailian/… (thinking=off …)`。
+期望：`Up (healthy)`，RestartCount 不持续增加，`/healthz` 含 `"ok":true`，日志只有 `agent model: bailian/… (thinking=off …)`。
 
 再看 OpenClaw 自身：
 
@@ -105,19 +100,18 @@ docker logs --since 30m --timestamps xa-gateway
 
 | 必须备份 | 可重建 |
 | --- | --- |
-| `~/xa` 下 `docker-compose.yml`、`entrypoint.sh`、`config/`、`workspace/`、`secrets/`、`oa-bridge-config.json` | 镜像（按仓库重建）、企微插件（npm 重装） |
+| `~/xa` 下 `docker-compose.yml`、`.env`、`config/`（含已装的企微插件）、`workspace/`、`oa-bridge-config.json` | 镜像（按仓库重建） |
 | MySQL `xa_oa`（`mysqldump`，见安装手册第 3 节） | 容器 |
 
 ```bash
 STAMP="$(date +%Y%m%d-%H%M%S)"; mkdir -p ~/xa-backups
 cd ~/xa && docker compose stop
 tar --exclude='xa/extensions' -czf ~/xa-backups/xa-${STAMP}.tar.gz -C ~ \
-  xa/docker-compose.yml xa/entrypoint.sh xa/config xa/workspace xa/secrets xa/oa-bridge-config.json
-chmod 600 ~/xa-backups/xa-${STAMP}.tar.gz
+  xa/docker-compose.yml xa/.env xa/config xa/workspace xa/oa-bridge-config.json
 docker compose start
 ```
 
-只备配置不停机时去掉 `stop` / `start`。备份含 secrets，只放本机或企业加密盘。
+只备配置不停机时去掉 `stop` / `start`。备份含 `.env` 里的全部凭据，只放本机或企业加密盘，不传公共网盘。
 
 恢复：
 
@@ -125,25 +119,24 @@ docker compose start
 cd ~/xa && docker compose down
 mv ~/xa ~/xa.broken.$(date +%Y%m%d-%H%M%S) && mkdir ~/xa
 tar -xzf ~/xa-backups/xa-<时间戳>.tar.gz -C ~
-sudo chown -R 1000:1000 ~/xa && chmod 600 ~/xa/secrets/*.txt && chmod 755 ~/xa/entrypoint.sh
 docker images | grep xa-gateway-oa      # 没有就按安装手册第 5 节重建
 cd ~/xa && docker compose up -d
 ```
 
-企微插件在 `extensions/` 下未备份，恢复后按安装手册第 8 节重装。验证后先用测试机器人，再切回生产 Bot。
+换了机器或换了登录用户时，先把 `.env` 里的 `XA_UID` / `XA_GID` 改成新用户的 `id -u` / `id -g`。`oc plugins list` 里没有企微插件就按安装手册第 8 节重装。验证后先用测试机器人，再切回生产 Bot。
 
 ## 6. 密钥轮换与升级
 
-**密钥**：只改 `~/xa/secrets/*.txt`（先 `cp -a x.txt x.txt.bak`，`printf '%s'` 写新值），再 `down && up`，验证后删 `.bak`。
+**密钥**：先 `cp -a ~/xa/.env ~/xa/.env.bak`，改 `.env` 里对应一行，`docker compose up -d`，验证后删 `.env.bak`。
 
-| 文件 | 新值来源 | 轮完验证 |
+| 变量 | 新值来源 | 轮完验证 |
 | --- | --- | --- |
-| `gateway_token.txt` | `openssl rand -base64 32` | 新 token 能开 Dashboard |
-| `wecom_bot_*.txt` | 企微后台重置机器人 | 收发正常 |
-| `model_api_key.txt` | 百炼控制台新建 Key | 对话无 401 |
-| `oa_mysql_password.txt` | DBA 先改 MySQL 密码 | 日志无 `MySQL init failed` |
-| `oa_app_secret.txt` / `oa_api_user_id.txt` | OA 管理端 | OA 只读预检通过 |
-| `wecom_identity_*.txt` | 企微自建应用 | 新员工 `prepare` 能查到身份 |
+| `OPENCLAW_GATEWAY_TOKEN` | `openssl rand -base64 32` | 新 token 能开控制台 |
+| `XA_IT_WECOM_BOT_*` | 企微后台重置机器人 | 收发正常 |
+| `XA_DOMESTIC_API_KEY` | 百炼控制台新建 Key | 对话无 401 |
+| `OA_MYSQL_PASSWORD` | DBA 先改 MySQL 密码 | 日志无 `MySQL init failed` |
+| `OA_APP_SECRET` / `OA_API_USER_ID` | OA 管理端 | OA 只读预检通过 |
+| `WECOM_IDENTITY_*` | 企微自建应用 | 新员工 `prepare` 能查到身份 |
 
 注入检查（只看非空，不打印值）：
 
@@ -151,7 +144,7 @@ cd ~/xa && docker compose up -d
 docker exec xa-gateway sh -c 'for v in OPENCLAW_GATEWAY_TOKEN XA_IT_WECOM_BOT_ID XA_DOMESTIC_API_KEY OA_MYSQL_PASSWORD WECOM_IDENTITY_SECRET; do eval "test -n \"\$$v\"" || echo MISSING:$v; done; echo CHECKED'
 ```
 
-**升级 OpenClaw**：改 `docker/Dockerfile` 的 `OPENCLAW_IMAGE`（或 `--build-arg`），用新 tag 构建，改 compose `image:`，`down && up`，再 `config validate`、`doctor`（只看不改）。回滚 = 把 `image:` 改回旧 tag 再 `down && up`。`doctor --fix` 会改 `agents.entries`，先备份 json，不要在生产 Bot 上首次试。配置被改坏时连 `config/` 一起恢复。
+**升级 OpenClaw**：改 `docker/Dockerfile` 的 `OPENCLAW_IMAGE`（或 `--build-arg`），用新 tag 构建，改 compose `image:`，`up -d`，再 `config validate`、`doctor`（只看不改）。回滚 = 把 `image:` 改回旧 tag 再 `up -d`。`doctor --fix` 会改 `agents.entries`，先备份 json，不要在生产 Bot 上首次试。配置被改坏时连 `config/` 一起恢复。
 
 **升级企微插件**：见 [WeCom 通道插件接入手册.md](WeCom%20通道插件接入手册.md) 第 5 节。
 
@@ -183,14 +176,13 @@ crontab -l && systemctl is-active cron
 
 ## 8. 崩溃熔断（crash-loop breaker）
 
-日志出现 `restart-loop breaker tripped` / `[wecom] channel autostart suppressed`：5 分钟内多次不洁启动后，控制面照常起来，但通道不自动拉。先修好根因（json / secret / 插件路径），然后二选一：
+日志出现 `restart-loop breaker tripped` / `[wecom] channel autostart suppressed`：5 分钟内多次不洁启动后，控制面照常起来，但通道不自动拉。先修好根因（json / `.env` / 插件路径），然后二选一：
 
 - 什么都不做，约 5 分钟后同一进程会自己拉起通道；
-- 立即拉起（需要 token）：
+- 立即拉起：
 
 ```bash
-docker exec -it -e OPENCLAW_GATEWAY_TOKEN="$(tr -d '\n' < ~/xa/secrets/gateway_token.txt)" \
-  xa-gateway node dist/index.js gateway call channels.start --params '{"channel":"wecom","accountId":"default"}'
+docker exec -it xa-gateway node dist/index.js gateway call channels.start --params '{"channel":"wecom","accountId":"default"}'
 ```
 
 不要再 `compose restart`（会重新计数），不要用 `channels start --channel`。之后 `channels status --channel wecom --probe` 应为 `works`，日志有 `Authentication successful`。
@@ -202,9 +194,9 @@ docker exec -it -e OPENCLAW_GATEWAY_TOKEN="$(tr -d '\n' < ~/xa/secrets/gateway_t
 | `Cannot connect to the Docker daemon` | `sudo systemctl start docker`；`groups` 含 `docker` |
 | 容器 `Restarting` | `docker logs --tail 200 xa-gateway`；`down`，按日志改 json，`up`。Restarting 时别 `exec` |
 | `/healthz` 不通但容器 Up | `gateway.bind` 必须是 `lan`；看启动日志 |
-| 企微突然不回 | 先看日志有无熔断（第 8 节）；没有就 `restart`；仍不行 `down && up`，并查有无第二套容器抢同一 Bot：`docker ps -a` |
+| 企微突然不回 | 先看日志有无熔断（第 8 节）；没有就 `restart`；仍不行 `up -d --force-recreate`，并查有无第二套容器抢同一 Bot：`docker ps -a` |
 | 回复很慢 | 时间线：inbound → `model-fetch` → `kind=final` → `Reply message sent`。见 [DashScope 手册](DashScope%20兼容%20Provider%20配置手册.md) 第 4 节 |
-| `Unknown model` / unresolved | `model_ref.txt` 前缀必须等于 Provider 键 `bailian` |
+| `Unknown model` / unresolved | `.env` 的 `XA_DOMESTIC_MODEL_ID` 填错，或 json 的 Provider 键不是 `bailian` |
 | `MySQL init failed` / `DB_UNAVAILABLE` | 见安装手册第 10 节 |
 | `Cannot find package 'mysql2'` / `plugin path not found: /opt/xa/…` | 不是自建镜像；重建并核对 compose `image:` |
 | 员工「还不能提交到 OA」/ `OA_IDENTITY_*` | [企微到OA身份.md](OA_tool/企微到OA身份.md) 第 7 节 |
@@ -216,7 +208,7 @@ docker exec -it -e OPENCLAW_GATEWAY_TOKEN="$(tr -d '\n' < ~/xa/secrets/gateway_t
 OA 只读预检（不建单）：
 
 ```bash
-docker exec -it xa-gateway sh -c 'export OA_MYSQL_PASSWORD="$(tr -d "\n" < /run/secrets/oa_mysql_password)" OA_API_USER_ID="$(tr -d "\n" < /run/secrets/oa_api_user_id)" OA_APP_SECRET="$(tr -d "\n" < /run/secrets/oa_app_secret)"; node /opt/xa/oa-workflow-bridge/scripts/readonly-preflight.mjs'
+docker exec xa-gateway node /opt/xa/oa-workflow-bridge/scripts/readonly-preflight.mjs
 ```
 
 ## 10. OA 结果不明（unknown）对账
@@ -261,7 +253,62 @@ UPDATE xa_oa.oa_ticket
 
 ## 11. 多套环境与安全
 
-- 同一企微 Bot 只能被一个 Gateway 持有，不要同时 `up` 两套挂了同一 `wecom_bot_*.txt` 的目录。
-- 另一套业务用独立目录、容器名、端口、secrets、Bot：`~/xa-hr` / `xa-hr-gateway` / `18790`，测试 `~/xa-staging` / `18791`。可以共用 MySQL 服务器，但必须不同库、不同账号。
-- secrets `600`、属主 `1000:1000`；`docker port xa-gateway` 应只绑 `127.0.0.1`。
+- 同一企微 Bot 只能被一个 Gateway 持有，不要同时 `up` 两套 `.env` 里是同一个 Bot 的目录。
+- 另一套业务用独立目录、容器名、端口、`.env`、Bot：`~/xa-hr` / `xa-hr-gateway` / `18790`，测试 `~/xa-staging` / `18791`。可以共用 MySQL 服务器，但必须不同库、不同账号。
+- `.env` 不进 git；机器上除了运维还有别人能登录时 `chmod 600 ~/xa/.env`。docker 组只给运维（能跑 docker 就能 `docker inspect` 看到环境变量）。`docker port xa-gateway` 应只绑 `127.0.0.1`。
 - 测试环境只用测试机器人，不放生产 BotSecret。
+
+## 12. 旧部署迁到 `.env`（一次性）
+
+2026-11 之前装的环境用的是 `~/xa/secrets/*.txt` + `entrypoint.sh`。迁移只换凭据来源和运行身份，`openclaw.json`、工作区、MySQL 数据都不动。约 10 分钟，期间机器人不回消息。
+
+1. 拉新仓库，按安装手册第 5 节**重新构建镜像**（新 Dockerfile 才允许任意 uid 运行）。
+2. 把 secret 文件转成 `.env`（在 `~/xa` 下执行；secret 文件属主是 1000，所以用 sudo 读）：
+
+   ```bash
+   cd ~/xa && XA_UID=$(id -u) XA_GID=$(id -g) sudo -E python3 - <<'EOF'
+   import os, pathlib
+   names = {
+       "gateway_token": "OPENCLAW_GATEWAY_TOKEN",
+       "wecom_bot_id": "XA_IT_WECOM_BOT_ID", "wecom_bot_secret": "XA_IT_WECOM_BOT_SECRET",
+       "model_api_key": "XA_DOMESTIC_API_KEY", "model_base_url": "XA_DOMESTIC_BASE_URL", "model_id": "XA_DOMESTIC_MODEL_ID",
+       "oa_mysql_password": "OA_MYSQL_PASSWORD", "oa_api_user_id": "OA_API_USER_ID", "oa_app_secret": "OA_APP_SECRET",
+       "wecom_identity_corpid": "WECOM_IDENTITY_CORPID", "wecom_identity_secret": "WECOM_IDENTITY_SECRET",
+   }
+   lines = [f"XA_UID={os.environ['XA_UID']}", f"XA_GID={os.environ['XA_GID']}"]
+   for file, var in names.items():
+       value = pathlib.Path(f"secrets/{file}.txt").read_text().strip()
+       if "'" in value:
+           raise SystemExit(f"{file}.txt 含单引号，请手工写进 .env")
+       lines.append(f"{var}='{value}'")
+   env = pathlib.Path(".env")
+   env.write_text("\n".join(lines) + "\n")
+   os.chown(env, int(os.environ["XA_UID"]), int(os.environ["XA_GID"]))
+   os.chmod(env, 0o600)
+   print("写好 .env：", len(lines) - 2, "项凭据")
+   EOF
+   ```
+
+   `model_ref.txt` 不再需要（compose 自动拼 `bailian/<模型 ID>`）。
+3. 换 compose，停旧容器，文件属主改成自己（只此一次）：
+
+   ```bash
+   cd ~/xa && docker compose down && cp docker-compose.yml docker-compose.yml.old
+   ```
+
+   ```bash
+   cp ~/handoff/xa/docker/docker-compose.yml ~/xa/
+   ```
+
+   ```bash
+   sudo chown -R $(id -u):$(id -g) ~/xa
+   ```
+
+4. 启动并验证：`docker compose up -d`，然后跑第 2 节健康检查和 OA 只读预检，测试机器人发一条消息。
+5. 都正常后删旧文件：
+
+   ```bash
+   rm -rf ~/xa/secrets ~/xa/entrypoint.sh ~/xa/docker-compose.yml.old
+   ```
+
+回滚（第 5 步之前）：`docker compose down`，`mv docker-compose.yml.old docker-compose.yml`，`sudo chown -R 1000:1000 ~/xa`，`docker compose up -d`。旧 compose 用的镜像 tag 如果被新构建覆盖了，旧 compose 也能用新镜像跑（以 uid 1000 运行）。

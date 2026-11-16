@@ -7,7 +7,7 @@ OA 桥接插件 `oa-workflow-bridge`（工具 `oa_workflow`）的唯一正文：
 | 代码 | `OA_tool/oa-workflow-bridge/`，打进镜像 `/opt/xa/oa-workflow-bridge` |
 | 状态 | 独立 MySQL：`oa_ticket` / `oa_inbox` / `oa_identity` |
 | 身份转换 | 插件内 `src/identity/`，不注册工具 |
-| 锁 | 进程内队列（`withStateLock`）+ 库层唯一约束兜底「同一人一张待确认」 |
+| 锁 | 进程内按人加锁（`withSenderLock`），不同员工互不等待；库层唯一约束兜底「同一人一张待确认」 |
 | 附件 | 本机 staging，字节不进库、不进模型 |
 | 建单开关 | `bridge-config.json` 的 `active`；流转开关 `isnextflow`（现网 `"0"`） |
 | 依赖 | `mysql2`、`jpeg-js`、`pngjs` |
@@ -91,7 +91,7 @@ prepare ──► awaiting_confirmation ──submit──► submitting ──O
 
 ### 2.4 并发
 
-`src/store.mjs` 的 `withStateLock` 是进程内 Promise 队列（可重入）。收附件、prepare（替换旧单、认领 inbox、写工单）、attach、cancel、过期回收都在锁内，互相不会吞附件。`submit_confirmed` 在锁内标 `submitting` 并登记进行中；并发的第二次确认等第一次结果，回 `ALREADY_SUBMITTED`，不会二次调 OA。附件编码与 OA HTTP 在锁外。
+`src/store.mjs` 的 `withSenderLock(sender_code, …)` 是按发送人分开的进程内队列（可重入）。同一个人的收附件、prepare（替换旧单、认领 inbox、写工单）、attach、cancel、过期回收都在他自己的锁内串行，互相不会吞附件；不同的人各排各的队，一个人拷大附件不会挡住别人。定时回收逐个拿对应员工的锁；孤儿 staging 目录回收不拿锁，靠 10 分钟宽限期避开并发 prepare。MySQL 连接池 10 个连接。`submit_confirmed` 在锁内标 `submitting` 并登记进行中；并发的第二次确认等第一次结果，回 `ALREADY_SUBMITTED`，不会二次调 OA。附件编码与 OA HTTP 在锁外。
 
 ### 2.5 附件
 
@@ -148,7 +148,7 @@ AGENTS.md 规则零条命中、但确实是 IT 方面的事时，模型不传 `t
 
 ## 4. 配置
 
-`~/xa/oa-bridge-config.json`，compose 只读挂到 `/opt/xa/oa-workflow-bridge/bridge-config.json`，改了 `down && up`，不必重建镜像。样例 `bridge-config.example.json`。
+`~/xa/oa-bridge-config.json`，compose 只读挂到 `/opt/xa/oa-workflow-bridge/bridge-config.json`，改了 `docker compose restart`，不必重建镜像。样例 `bridge-config.example.json`。
 
 | 字段 | 说明 |
 | --- | --- |
@@ -171,7 +171,7 @@ AGENTS.md 规则零条命中、但确实是 IT 方面的事时，模型不传 `t
 | --- | --- | --- |
 | 企微加密 SenderId | 通道 `requesterSenderId` | 只取哈希作 `sender_code` / `mapping_code` |
 | 申请人 OA 人员 id | `oa_identity` 缓存；miss 时 `user/get`（失败回退 `openuserid_to_userid`）→ 明文 userid 即工号 → `getHrmUserInfoWithPage` | 建单 Header `userid`（RSA 加密）与表单 `xqsqr` |
-| 接口账号 `OA_API_USER_ID` | secret | 只用于换 token 与只读预检 |
+| 接口账号 `OA_API_USER_ID` | `.env` | 只用于换 token 与只读预检 |
 
 命中缓存 0 次外部 HTTP。企微 / 人事 HTTP 不重试；`NOT_CONFIGURED` / `TOKEN_FAILED` 不写负缓存，其它失败码写 10 分钟负缓存。身份失败时不写工单。错误码与排查见 [企微到OA身份.md](企微到OA身份.md)。手工排查：
 
@@ -272,10 +272,10 @@ OA_MYSQL_TEST_HOST=<测试库主机> OA_MYSQL_TEST_USER=xa_oa OA_MYSQL_TEST_DATA
 
 ### 7.2 只读预检
 
-Gateway 起来、secret 已注入后：
+Gateway 起来后（凭据是容器环境变量，`docker exec` 直接读得到）：
 
 ```bash
-docker exec -it xa-gateway sh -c 'export OA_MYSQL_PASSWORD="$(tr -d "\n" < /run/secrets/oa_mysql_password)" OA_API_USER_ID="$(tr -d "\n" < /run/secrets/oa_api_user_id)" OA_APP_SECRET="$(tr -d "\n" < /run/secrets/oa_app_secret)"; node /opt/xa/oa-workflow-bridge/scripts/readonly-preflight.mjs'
+docker exec xa-gateway node /opt/xa/oa-workflow-bridge/scripts/readonly-preflight.mjs
 ```
 
 先连库并检查三张表（不建表、不写数据），再调 `getCreateWorkflowList`（不建单）。
@@ -290,10 +290,10 @@ docker exec -it xa-gateway sh -c 'export OA_MYSQL_PASSWORD="$(tr -d "\n" < /run/
 
 ### 7.3 使用统计与 OA 对账
 
-只读脚本，在 Gateway 容器里跑（需要 `OA_MYSQL_PASSWORD`，取法同 7.2）：
+只读脚本，在 Gateway 容器里跑：
 
 ```bash
-docker exec -it xa-gateway sh -c 'export OA_MYSQL_PASSWORD="$(tr -d "\n" < /run/secrets/oa_mysql_password)"; node /opt/xa/oa-workflow-bridge/scripts/stats.mjs --days 30'
+docker exec xa-gateway node /opt/xa/oa-workflow-bridge/scripts/stats.mjs --days 30
 ```
 
 输出 JSON：各状态单数、使用人数、成功提交过的人数、每日建单 / 提交、各所属系统待确认数、待对账数。不含员工身份。
@@ -301,7 +301,7 @@ docker exec -it xa-gateway sh -c 'export OA_MYSQL_PASSWORD="$(tr -d "\n" < /run/
 与 OA 逐号对账（复盘「台账对账」项）：先从 OA 导出同期流程 602 的单号清单（CSV / 文本，每行含数字单号），拷进容器后：
 
 ```bash
-docker exec -it xa-gateway sh -c 'export OA_MYSQL_PASSWORD="$(tr -d "\n" < /run/secrets/oa_mysql_password)"; node /opt/xa/oa-workflow-bridge/scripts/reconcile.mjs --oa /tmp/oa-export.csv'
+docker exec xa-gateway node /opt/xa/oa-workflow-bridge/scripts/reconcile.mjs --oa /tmp/oa-export.csv
 ```
 
 输出小A成功提交数、在 OA 里找到的数、`missingInOa`（小A记成功但 OA 清单没有）与 `notMarkedSubmitted`（有 OA 单号但小A记成待对账等）。不带 `--oa` 则导出小A成功单号 CSV。
@@ -314,7 +314,7 @@ docker exec -it xa-gateway sh -c 'export OA_MYSQL_PASSWORD="$(tr -d "\n" < /run/
 | --- | --- |
 | `Cannot find module 'jpeg-js'` / `Cannot find package 'mysql2'` | 用的不是安装手册第 5 节构建的镜像（compose `image:` 应为 `xa-gateway-oa:…`），或 `load.paths` 仍指向 `~/xa/extensions` 下的旧目录 |
 | `MySQL init failed: ENOENT … bridge-config.json` | compose 没挂 `./oa-bridge-config.json` |
-| `MySQL init failed: OA_MYSQL_PASSWORD is not configured` | compose 缺 `oa_mysql_password` secret 或 entrypoint 没 export；补完 `down && up` |
+| `MySQL init failed: OA_MYSQL_PASSWORD is not configured` | compose 不是仓库版本（仓库版会在 `.env` 缺项时直接拒绝启动）；换成仓库 compose 后 `up -d` |
 | `ECONNREFUSED` / `ETIMEDOUT` / `EHOSTUNREACH` | 主机或端口错；MySQL 未监听外网地址（`bind-address`）；防火墙未放通 Gateway → 3306 |
 | `ER_ACCESS_DENIED_ERROR` | 密码错；账号 host 部分不含 Gateway 来源 IP；本机装的 MySQL 还留着匿名账号（见安装手册第 3 节） |
 | `ER_BAD_DB_ERROR` | 库没建，或 `mysql.database` 写错 |
@@ -337,5 +337,5 @@ docker exec -it xa-gateway sh -c 'export OA_MYSQL_PASSWORD="$(tr -d "\n" < /run/
 - 不要把附件 base64 写进库。
 - 不要对 `unknown` / `failed` 自动再 `submit_confirmed`。
 - 不要用接口账号人员 id 当建单 Header `userid`；不要按姓名模糊匹配申请人。
-- 不要在宿主装 npm，不要把 `npm install` 写进 compose / entrypoint。
+- 不要在宿主装 npm，不要把 `npm install` 写进 compose。
 - 不要在 `active=false` 时让规则声称 OA 已通。

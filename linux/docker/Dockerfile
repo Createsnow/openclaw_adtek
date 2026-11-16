@@ -13,5 +13,9 @@ COPY OA_tool/oa-workflow-bridge /opt/xa/oa-workflow-bridge
 RUN cd /opt/xa/oa-workflow-bridge \
  && rm -rf node_modules tests bridge-config.json \
  && npm ci --omit=dev --no-audit --no-fund \
- && chown -R 1000:1000 /opt/xa
+ && mkdir -p /home/node/.cache \
+ && chmod 1777 /home/node /home/node/.cache
+# 容器按宿主机用户的 uid 运行（不一定是 1000）：
+# - 插件目录保持 root 所有、只读。OpenClaw 只加载属于当前用户或 root 的插件，root 对任何 uid 都放行
+# - HOME 与 ~/.cache 让任何 uid 都能写（OpenClaw 在 ~/.cache 下建临时目录）
 USER 1000:1000

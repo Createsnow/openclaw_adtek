@@ -1,6 +1,6 @@
 # DashScope 兼容 Provider 配置手册
 
-阿里云百炼（DashScope）在 OpenClaw 里按 **OpenAI 兼容自定义 Provider** 接入。完整配置以仓库 `workspace-rules/openclaw.json` 的 `models` 段为准；凭据经 secret 注入，见安装手册第 4 节。
+阿里云百炼（DashScope）在 OpenClaw 里按 **OpenAI 兼容自定义 Provider** 接入。完整配置以仓库 `workspace-rules/openclaw.json` 的 `models` 段为准；凭据写在 `.env`，见安装手册第 4 节。
 
 官方参考：[OpenClaw Custom providers](https://docs.openclaw.ai/gateway/config-tools#custom-providers-and-base-urls)、[OpenClaw Qwen thinking controls](https://docs.openclaw.ai/providers/qwen)、[百炼 OpenAI 兼容接口](https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope)。
 
@@ -13,7 +13,7 @@
 | 展示名（必填，缺了 exit 78） | `models[].name` | `qwen3.8 flash`，可与 id 不同 |
 | 完整引用 | Agent `model` = `${XA_DOMESTIC_MODEL_REF}` | `bailian/<模型 ID>` |
 
-**Provider 键、`model_ref.txt` 前缀、启动日志里的 `agent model: bailian/…` 必须一致。** 环境变量前缀 `XA_DOMESTIC_*` 是历史命名，与 Provider 键无关。
+**Provider 键、`XA_DOMESTIC_MODEL_REF` 的前缀、启动日志里的 `agent model: bailian/…` 必须一致。** compose 已固定拼成 `bailian/${XA_DOMESTIC_MODEL_ID}`，`.env` 里只填模型 ID。 环境变量前缀 `XA_DOMESTIC_*` 是历史命名，与 Provider 键无关。
 
 ## 2. 地域与 Base URL
 
@@ -63,8 +63,8 @@ API Key、Base URL、模型必须同一地域：
 
 | 日志 | 原因 | 处理 |
 | --- | --- | --- |
-| exit 78，`models.providers.bailian.models.0.name: Invalid input` | 缺 `name` 或 JSON 语法错 | 补字段，`down && up` |
-| `Unknown model: bailian/…`、`model_not_found` | `model_ref.txt` 前缀与 Provider 键不一致 | 统一成 `bailian/<模型 ID>`，`down && up` |
+| exit 78，`models.providers.bailian.models.0.name: Invalid input` | 缺 `name` 或 JSON 语法错 | 补字段，`docker compose restart` |
+| `Unknown model: bailian/…`、`model_not_found` | 模型 ID 填错，或 json 的 Provider 键不是 `bailian` | 改 `.env` 的 `XA_DOMESTIC_MODEL_ID` 后 `docker compose up -d`；Provider 键保持 `bailian` |
 | 日志模型正确但调用失败 | Key 没开通该模型，或地域不一致 | 百炼控制台确认；先换 `qwen-plus` 测连通 |
 | `restart-loop breaker tripped` | 之前多次启动失败 | 运维手册第 8 节 |
 | 有 `agent/models.json`（可能含明文 Key） | Control UI / CLI 写过 Provider | 删除 `~/xa/config/agents/itservicedeskagent/agent/models.json`，`restart` |
@@ -72,7 +72,7 @@ API Key、Base URL、模型必须同一地域：
 
 ## 6. 换模型与回归
 
-只换模型：改 `model_id.txt` 和 `model_ref.txt`（`bailian/<新 ID>`），`down && up`，看 `agent model` 日志。json 不用改。换 Base URL / Key 同理只改 secret。
+只换模型：改 `.env` 的 `XA_DOMESTIC_MODEL_ID`，`docker compose up -d`，看 `agent model` 日志。json 不用改。换 Base URL / Key 同理只改 `.env`。
 
 换模型时不要同时改 OA `active`、规则或插件，否则分不清是谁的问题。回归要点：
 

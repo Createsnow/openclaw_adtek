@@ -19,7 +19,7 @@ String secretEncry = rsa.encrypt(null, secret, null, "utf-8", spk, false);   // 
 String useridEncry = rsa.encrypt(null, userid, null, "utf-8", spk, false);   // 后续接口 Header 用
 ```
 
-secret 和公钥都是密钥材料，只放 secret 文件和配置，不写进文档或仓库。
+secret 只放部署目录的 `.env`（`OA_APP_SECRET`），不写进文档或仓库。
 
 ## 2. 换 token
 
