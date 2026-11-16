@@ -90,7 +90,7 @@ sudo systemctl enable --now docker
 在源机器上（只拷这一份仓库）：
 
 ```bash
-rsync -avz --exclude .git /path/to/adt_openclaw/ YOUR_LINUX_USER@SERVER:~/handoff/xa/
+rsync -avz --exclude .git /path/to/openclaw_adtek/ YOUR_LINUX_USER@SERVER:~/handoff/xa/
 ```
 
 在服务器上：
